@@ -202,7 +202,11 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
       telegram.redAt = now;
       telegramRed = true;
     }
-  } else if (telegram.consecutiveFailures > 0 || telegram.redAt !== undefined) {
+  } else if (messagesSent + alertsSent > 0 && (telegram.consecutiveFailures > 0 || telegram.redAt !== undefined)) {
+    // Починку доказывает только доставленное сообщение. Запуск, которому нечего
+    // было отправить, о Telegram ничего не знает: если бы он сбрасывал отметку,
+    // мигающий источник при заблокированном чате алертов красил бы каждый
+    // второй запуск.
     telegram.consecutiveFailures = 0;
     delete telegram.redAt;
   }

@@ -26,6 +26,9 @@ export async function requestJson(
   try {
     return { status, body: JSON.parse(text) as unknown };
   } catch {
+    // Страница ошибки прокси («502 Bad Gateway» в HTML) — временный сбой сети,
+    // а не смена формата API: подсказка «радару нужна правка» здесь ложная.
+    if (status >= 400) throw new SourceError('http', `ответ не в JSON (HTTP ${status})`);
     throw new SourceError('bad_response', `ответ не в JSON (HTTP ${status})`);
   }
 }

@@ -277,6 +277,21 @@ describe('runRadar: алерты', () => {
     assert.equal(later.exitCode, 1, 'через сутки поломка снова красит запуск');
   });
 
+  it('чат алертов не принимает сообщения, источник мигает: красный запуск всё равно раз в сутки', async () => {
+    const { world, state } = await bootstrapped();
+    const broken = json({ error: { code: 2, message: 'Service temporarily unavailable' } }, 500);
+    world.blockedChats.add(SECRETS.telegramAlertChatId ?? '-');
+    const codes: number[] = [];
+    // 6 часов: сбой, сбой, успех — запуски без отправки не доказывают, что Telegram починился
+    for (let i = 0; i < 36; i += 1) {
+      if (i % 3 === 2) delete world.fail.graph;
+      else world.fail.graph = broken;
+      codes.push((await runRadar(state, deps(world, T0 + i * 10 * MINUTE))).exitCode);
+    }
+    assert.equal(codes.filter((c) => c === 1).length, 1, `красные запуски: ${codes.join('')}`);
+    assert.equal(world.alertMessages().length, 0, 'проверка не пустая: чат действительно закрыт');
+  });
+
   it('уведомление о починке не теряется, если Telegram в этот момент недоступен', async () => {
     const { world, state } = await bootstrapped();
     world.fail.graph = json({ error: { code: 190, message: 'session invalidated' } }, 400);

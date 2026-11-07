@@ -402,6 +402,15 @@ describe('секреты и сеть', () => {
       return e instanceof SourceError && e.kind === 'network' && !e.message.includes(SECRETS.telegramBotToken ?? '-');
     });
   });
+  it('страница ошибки не в JSON — сбой сети, а не смена формата API', async () => {
+    const reply = (status: number) => async () => new Response('<html>502 Bad Gateway</html>', { status });
+    await assert.rejects(requestJson(reply(502), 'https://example.test'), (e: unknown) => {
+      return e instanceof SourceError && e.kind === 'http' && e.message.includes('HTTP 502');
+    });
+    await assert.rejects(requestJson(reply(200), 'https://example.test'), (e: unknown) => {
+      return e instanceof SourceError && e.kind === 'bad_response';
+    });
+  });
   it('Telegram: один повтор после 429 с retry_after', async () => {
     let calls = 0;
     const slept: number[] = [];
