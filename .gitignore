@@ -1,0 +1,5 @@
+node_modules/
+# Ветка состояния, которую workflow подключает как worktree
+state-store/
+# Состояние локальных прогонов
+state/

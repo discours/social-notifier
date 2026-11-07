@@ -1,0 +1,71 @@
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Строка как есть; конечное число — в виде строки (ID в ответах API бывают и тем и другим). */
+export function asString(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
+/**
+ * Время из Graph API: `2026-11-07T13:17:00+0000`. Смещение без двоеточия
+ * не входит в стандарт ISO, поэтому перед разбором двоеточие добавляется.
+ */
+export function parseGraphTime(value: unknown): number | undefined {
+  if (typeof value !== 'string') return undefined;
+  const ms = Date.parse(value.replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
+  return isPlausibleTime(ms) ? ms : undefined;
+}
+
+/**
+ * Ссылка из ответа API, если это настоящий http(s)-адрес: в нормализованном
+ * виде (`URL.href`). Пустая строка, `javascript:` и прочее — undefined, и
+ * адаптер берёт запасную ссылку.
+ */
+export function httpUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value === '') return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Заменяет одиночные суррогаты на U+FFFD. Текст из API бывает обрезан
+ * посередине эмодзи; Telegram такое сообщение отвергает (не UTF-8), и
+ * отвергнутое сообщение застряло бы первым в очереди.
+ */
+export function wellFormed(text: string): string {
+  return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, String.fromCharCode(0xfffd));
+}
+
+const EARLIEST_POST = Date.UTC(2000, 0, 1);
+const LATEST_POST = Date.UTC(2100, 0, 1);
+
+/**
+ * Время поста — конечное число в разумных пределах. Иначе мусорное значение
+ * из API (огромное число, Infinity) попало бы в очередь, в JSON стало бы null
+ * и сломало бы чтение состояния во всех следующих запусках.
+ */
+export function isPlausibleTime(ms: unknown): ms is number {
+  return typeof ms === 'number' && Number.isFinite(ms) && ms >= EARLIEST_POST && ms <= LATEST_POST;
+}
+
+const MIN_SECRET_LENGTH = 6;
+// Длинная сплошная строка из символов токена: страховка на случай, если API
+// вернёт в тексте ошибки токен, которого нет в списке известных секретов.
+const TOKEN_LIKE = /[A-Za-z0-9_\-.]{40,}/g;
+
+/** Вычищает из текста известные секреты и всё, что похоже на токен. */
+export function makeRedactor(secrets: readonly (string | undefined)[]): (text: string) => string {
+  const known = secrets.filter((s): s is string => typeof s === 'string' && s.length >= MIN_SECRET_LENGTH);
+  return (text) => {
+    let out = text;
+    for (const secret of known) out = out.split(secret).join('[секрет]');
+    return out.replace(TOKEN_LIKE, '[скрыто]');
+  };
+}

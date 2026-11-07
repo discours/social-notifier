@@ -1,0 +1,13 @@
+{
+  "messageTitle": "Новые посты Дискурса, поддержим лайком и репостом:",
+  "groupWindowMinutes": 10,
+  "maxPostAgeHours": 48,
+  "fetchLimit": 10,
+  "graphApiVersion": "v25.0",
+  "vkApiVersion": "5.199",
+  "sources": [
+    { "id": "vk", "type": "vk", "label": "VK", "ownerId": -89236419 },
+    { "id": "instagram", "type": "instagram", "label": "Instagram", "pageId": "1430627470564984" },
+    { "id": "facebook", "type": "facebook", "label": "Facebook", "pageId": "1430627470564984" }
+  ]
+}

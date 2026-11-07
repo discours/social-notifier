@@ -1,0 +1,42 @@
+name: probe
+
+# Ручная проверка доступов: читает каждый источник, показывает, какие страницы
+# и Instagram-аккаунты видит токен Meta, и проверяет бота Telegram.
+# Состояние не трогает. С send_test шлёт тестовое сообщение в чат алертов.
+
+on:
+  workflow_dispatch:
+    inputs:
+      send_test:
+        description: 'Отправить тестовое сообщение в Telegram'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Проба
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
+          VK_TOKEN: ${{ secrets.VK_TOKEN }}
+          META_TOKEN: ${{ secrets.META_TOKEN }}
+          SEND_TEST: ${{ inputs.send_test }}
+        run: |
+          args=()
+          if [ "$SEND_TEST" = "true" ]; then args+=(--send-test); fi
+          node src/probe.ts "${args[@]}"
