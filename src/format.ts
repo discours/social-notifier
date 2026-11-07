@@ -1,4 +1,5 @@
 import type { Post } from './types.ts';
+import { wellFormed } from './util.ts';
 
 /** Предел длины сообщения в Telegram. Считаем по HTML: он не короче видимого текста. */
 export const TELEGRAM_TEXT_LIMIT = 4096;
@@ -9,8 +10,12 @@ export interface OutgoingMessage {
   disablePreview: boolean;
 }
 
+/**
+ * Экранирует текст для parse_mode HTML. Через неё проходит всё динамическое
+ * содержимое сообщений, поэтому здесь же чинятся одиночные суррогаты.
+ */
 export function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return wellFormed(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 /** Первая непустая строка текста, сжатая до `max` символов по границе слова. */

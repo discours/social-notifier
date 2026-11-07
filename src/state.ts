@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { FailureKind } from './errors.ts';
 import type { PendingPost } from './types.ts';
@@ -9,14 +9,22 @@ export const STATE_VERSION = 1;
 export const SEEN_LIMIT = 200;
 
 export interface SourceState {
-  /** Первый успешный опрос пройден: текущие посты запомнены без уведомления. */
+  /** Первый успешный опрос пройден: посты до начала наблюдения запомнены без уведомления. */
   bootstrapped: boolean;
+  /**
+   * С какого момента радар следит за источником (первая попытка опроса, даже
+   * неудачная). Посты, вышедшие позже, при первом успешном опросе не
+   * проглатываются, а уходят как новые.
+   */
+  watchingSince?: number;
   /** Последние известные ID постов, новые в начале. */
   seen: string[];
   consecutiveFailures: number;
   lastError?: { kind: FailureKind; code?: string; message: string; at: number };
-  /** Когда последний раз ушёл алерт о поломке этого источника. */
+  /** Когда последний раз доставлен алерт о поломке этого источника. */
   alertedAt?: number;
+  /** Алерт доставлен, а «снова отвечает» — ещё нет. */
+  alertOpen?: true;
   /** Когда запуск последний раз покраснел из-за алерта по этому источнику. */
   alertRedAt?: number;
 }
@@ -45,18 +53,18 @@ export function emptyState(): RadarState {
 }
 
 /**
- * Состояние источника по id. Имена свойств прототипа (`constructor`,
- * `__proto__`) вернули бы чужой объект или подменили бы прототип; конфиг такие
- * id и так отклоняет, здесь вторая линия.
+ * Состояние источника по id; новое начинает наблюдение с `now`. Имена свойств
+ * прототипа (`constructor`, `__proto__`) вернули бы чужой объект или подменили
+ * бы прототип; конфиг такие id и так отклоняет, здесь вторая линия.
  */
-export function sourceStateOf(state: RadarState, id: string): SourceState {
+export function sourceStateOf(state: RadarState, id: string, now: number): SourceState {
   if (id in Object.prototype) throw new Error(`недопустимый id источника: ${id}`);
-  if (!Object.hasOwn(state.sources, id)) state.sources[id] = newSourceState();
+  if (!Object.hasOwn(state.sources, id)) state.sources[id] = newSourceState(now);
   return state.sources[id] as SourceState;
 }
 
-export function newSourceState(): SourceState {
-  return { bootstrapped: false, seen: [], consecutiveFailures: 0 };
+export function newSourceState(now?: number): SourceState {
+  return { bootstrapped: false, ...(now === undefined ? {} : { watchingSince: now }), seen: [], consecutiveFailures: 0 };
 }
 
 /** Добавляет ID в начало списка известных, без повторов, с ограничением длины. */
@@ -78,7 +86,8 @@ export function loadState(path: string): RadarState {
 
 /**
  * Повреждённое состояние — ошибка, а не повод начать с нуля: молчаливый сброс
- * потерял бы очередь неотправленных постов.
+ * потерял бы очередь неотправленных постов. Проверяются все поля, от которых
+ * зависит отправка и алерты: состояние могли поправить руками.
  */
 export function parseState(text: string): RadarState {
   let raw: unknown;
@@ -99,7 +108,12 @@ export function parseState(text: string): RadarState {
       typeof source.bootstrapped !== 'boolean' ||
       !Array.isArray(source.seen) ||
       !source.seen.every((s) => typeof s === 'string') ||
-      !isCount(source.consecutiveFailures)
+      !isCount(source.consecutiveFailures) ||
+      !isOptionalTime(source.watchingSince) ||
+      !isOptionalTime(source.alertedAt) ||
+      !isOptionalTime(source.alertRedAt) ||
+      !(source.alertOpen === undefined || source.alertOpen === true) ||
+      !(source.lastError === undefined || isRecord(source.lastError))
     ) {
       throw new Error(`файл состояния повреждён: источник ${id}`);
     }
@@ -117,6 +131,13 @@ export function parseState(text: string): RadarState {
       throw new Error('файл состояния повреждён: пост в очереди');
     }
   }
+  if (
+    raw.telegram !== undefined &&
+    (!isRecord(raw.telegram) || !isCount(raw.telegram.consecutiveFailures) || !isOptionalTime(raw.telegram.redAt))
+  ) {
+    throw new Error('файл состояния повреждён: telegram');
+  }
+  if (!isOptionalTime(raw.keepaliveAt)) throw new Error('файл состояния повреждён: keepaliveAt');
   return raw as unknown as RadarState;
 }
 
@@ -124,7 +145,14 @@ function isCount(value: unknown): boolean {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }
 
+function isOptionalTime(value: unknown): boolean {
+  return value === undefined || (typeof value === 'number' && Number.isFinite(value));
+}
+
+/** Запись через временный файл: прерванный запуск не оставит обрезанный JSON. */
 export function saveState(path: string, state: RadarState): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  renameSync(tmp, path);
 }

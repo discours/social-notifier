@@ -160,7 +160,56 @@ describe('runRadar: алерты', () => {
     assert.equal(recovery.length, 2);
     assert.ok(recovery.every((m) => m.includes('снова отвечает')));
     assert.equal(state.sources.facebook?.consecutiveFailures, 0);
-    assert.equal(state.sources.facebook?.alertedAt, undefined);
+    assert.equal(state.sources.facebook?.alertOpen, undefined, 'уведомление о починке доставлено');
+  });
+
+  it('мигающий источник: один алерт, одно «снова отвечает» и один красный запуск за сутки', async () => {
+    const { world, state } = await bootstrapped();
+    const broken = json({ error: { code: 2, message: 'Service temporarily unavailable' } }, 500);
+    let reds = 0;
+    // 3 часа: сбой, сбой, успех — и так по кругу
+    for (let i = 0; i < 18; i += 1) {
+      if (i % 3 === 2) delete world.fail.graph;
+      else world.fail.graph = broken;
+      reds += (await runRadar(state, deps(world, T0 + i * 10 * MINUTE))).exitCode;
+    }
+    assert.equal(reds, 1);
+    const alerts = world.alertMessages();
+    assert.equal(alerts.filter((m) => m.includes('не отвечает')).length, 2, 'по алерту на Instagram и Facebook');
+    assert.equal(alerts.filter((m) => m.includes('снова отвечает')).length, 2);
+  });
+
+  it('часть ответа не разобралась — разобранное доходит, а повтор даёт алерт', async () => {
+    const { world, state } = await bootstrapped();
+    world.addIg('9002', T0 - 20 * MINUTE);
+    world.ig.unshift({ id: '9003', timestamp: 'новый формат даты', permalink: 'https://www.instagram.com/p/9003/' });
+
+    await runRadar(state, deps(world, T0));
+    assert.equal(world.postsMessages().length, 1, 'разобранный пост отправлен');
+    assert.equal(world.alertMessages().length, 0, 'один раз — ещё не повод');
+
+    await runRadar(state, deps(world, T0 + 10 * MINUTE));
+    const alerts = world.alertMessages();
+    assert.equal(alerts.length, 1);
+    assert.ok(alerts[0]?.includes('не разобрано элементов ответа: 1 из'));
+  });
+
+  it('источник, сломанный с первого запуска, после починки присылает посты, вышедшие за это время', async () => {
+    const world = new FakeWorld();
+    world.addVk(100, T0 - 5 * HOUR, 'старый пост');
+    world.fail.vk = json({ error: { error_code: 5, error_msg: 'User authorization failed' } });
+    const state = emptyState();
+    await runRadar(state, deps(world, T0));
+    await runRadar(state, deps(world, T0 + 10 * MINUTE));
+
+    world.addVk(101, T0 + 2 * HOUR, 'вышел, пока ключ был сломан');
+    delete world.fail.vk;
+    await runRadar(state, deps(world, T0 + 3 * HOUR));
+    await runRadar(state, deps(world, T0 + 3 * HOUR + 10 * MINUTE));
+
+    const text = world.postsMessages().join('\n');
+    assert.ok(text.includes('wall-89236419_101"'), 'пост, вышедший после начала наблюдения, доставлен');
+    assert.ok(!text.includes('wall-89236419_100"'), 'архив не прислан');
   });
 
   it('VK продолжает работать, пока Meta сломана', async () => {
@@ -268,11 +317,16 @@ describe('runRadar: длинный дайджест', () => {
     for (let i = 0; i < 40; i += 1) world.addVk(200 + i, T0 - 30 * MINUTE + i * 1000, `Длинный заголовок поста ${i} `.repeat(6));
     world.telegramFailOnCall.add(2);
 
-    const first = await runRadar(state, deps(world, T0));
+    const lines: string[] = [];
+    const first = await runRadar(state, deps(world, T0, { log: (l) => lines.push(l) }));
     assert.equal(first.exitCode, 1);
     const delivered = first.postsSent;
     assert.ok(delivered > 0 && delivered < 40, `первое сообщение ушло (${delivered} постов), второе нет`);
     assert.equal(state.pending.length, 40 - delivered, 'с очереди сняты только доставленные');
+    const stuck = lines.find((l) => l.startsWith('не доставлено сообщение с постами: '));
+    assert.ok(stuck, 'лог называет посты недоставленного сообщения');
+    assert.ok(stuck.includes(`vk:${200 + delivered}`), 'первым назван первый недоставленный пост');
+    assert.ok(!stuck.includes(`vk:${200 + delivered - 1},`) && !stuck.endsWith(`vk:${200 + delivered - 1}`), 'доставленные не названы');
 
     await runRadar(state, deps(world, T0 + 10 * MINUTE));
     const text = world.postsMessages().join('\n');

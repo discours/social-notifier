@@ -1,10 +1,11 @@
-import { describeError, toSourceError } from './errors.ts';
+import { describeError, SourceError, toSourceError } from './errors.ts';
 import { formatDigest, type OutgoingMessage } from './format.ts';
 import { postKey, takeDue } from './group.ts';
 import {
   claimAlertRed,
   formatFailureAlert,
   formatRecoveryNotice,
+  markAlertSent,
   recordFailure,
   recordSuccess,
   REALERT_AFTER_MS,
@@ -64,13 +65,8 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
   let alertRed = false;
 
   for (const source of config.sources) {
-    const sourceState = sourceStateOf(state, source.id);
-
-    let parsed: ParsedPosts;
-    try {
-      parsed = await fetchSourcePosts(source, ctx);
-    } catch (err) {
-      const error = toSourceError(err, deps.redact);
+    const sourceState = sourceStateOf(state, source.id, now);
+    const fail = (error: SourceError): void => {
       const shouldAlert = recordFailure(sourceState, error, now);
       log(
         `${source.id}: ошибка ${error.kind}${error.code ? ` (${error.code})` : ''}: ${error.message}; ` +
@@ -80,31 +76,41 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
         if (claimAlertRed(sourceState, now)) alertRed = true;
         alerts.push({
           message: formatFailureAlert(source, error, sourceState.consecutiveFailures, deps.runUrl),
-          onSent: () => {
-            sourceState.alertedAt = now;
-          },
+          onSent: () => markAlertSent(sourceState, now),
         });
       }
+    };
+
+    let parsed: ParsedPosts;
+    try {
+      parsed = await fetchSourcePosts(source, ctx);
+    } catch (err) {
+      fail(toSourceError(err, deps.redact));
       continue;
     }
 
-    if (recordSuccess(sourceState)) {
+    const { posts, skipped } = parsed;
+    if (skipped > 0) {
+      // Среди нераспознанных элементов может быть новый пост. Это сбой
+      // источника (два запуска подряд — алерт), но разобранные посты идут дальше.
+      fail(new SourceError('bad_response', `не разобрано элементов ответа: ${skipped} из ${skipped + posts.length}`));
+    } else if (recordSuccess(sourceState)) {
       alerts.push({
         message: formatRecoveryNotice(source),
         onSent: () => {
-          delete sourceState.alertedAt;
+          delete sourceState.alertOpen;
         },
       });
     }
 
-    const { posts, skipped } = parsed;
-    const skippedNote = skipped > 0 ? `, нераспознанных элементов ${skipped}` : '';
-
     if (!sourceState.bootstrapped) {
+      // Первый успешный опрос: посты до начала наблюдения — архив, его не шлём.
+      // Вышедшие позже (источник был сломан с первого запуска) идут как новые.
       sourceState.bootstrapped = true;
-      rememberSeen(sourceState, posts.map((p) => p.id));
-      log(`${source.id}: первый запуск, запомнено постов без уведомления: ${posts.length}${skippedNote}`);
-      continue;
+      const since = sourceState.watchingSince ?? now;
+      const archive = posts.filter((p) => p.publishedAt < since);
+      rememberSeen(sourceState, archive.map((p) => p.id));
+      log(`${source.id}: первый успешный опрос, запомнено без уведомления: ${archive.length}`);
     }
 
     const known = new Set(sourceState.seen);
@@ -124,7 +130,7 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
       added += 1;
     }
     rememberSeen(sourceState, fresh.map((p) => p.id));
-    log(`${source.id}: получено ${posts.length}, новых в очереди ${added}${skippedNote}`);
+    log(`${source.id}: получено ${posts.length}, новых в очереди ${added}`);
   }
 
   const labels = new Map(config.sources.map((s) => [s.id, s.label]));
@@ -154,18 +160,22 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
   let telegramError: string | undefined;
   let postsSent = 0;
   let messagesSent = 0;
-  try {
-    // Посты снимаются с очереди после каждого доставленного сообщения: если
-    // Telegram откажет посередине длинного дайджеста, повторится только остаток.
-    for (const message of digest) {
+  // Посты снимаются с очереди после каждого доставленного сообщения: если
+  // Telegram откажет посередине длинного дайджеста, повторится только остаток.
+  for (const message of digest) {
+    try {
       await send(chatId, message);
-      const sent = new Set(message.posts.map(postKey));
-      state.pending = state.pending.filter((p) => !sent.has(postKey(p)));
-      postsSent += message.posts.length;
-      messagesSent += 1;
+    } catch (err) {
+      telegramError = describeError(err, deps.redact);
+      // Ключи постов нужны, чтобы снять из очереди сообщение, которое Telegram
+      // не принимает никогда (docs/setup.md, «Если посты перестали приходить»).
+      log(`не доставлено сообщение с постами: ${message.posts.map(postKey).join(', ')}`);
+      break;
     }
-  } catch (err) {
-    telegramError = describeError(err, deps.redact);
+    const sent = new Set(message.posts.map(postKey));
+    state.pending = state.pending.filter((p) => !sent.has(postKey(p)));
+    postsSent += message.posts.length;
+    messagesSent += 1;
   }
   if (messagesSent > 0) log(`отправлено постов: ${postsSent}, сообщений: ${messagesSent}`);
 

@@ -7,7 +7,7 @@ import { loadConfig, parseConfig } from '../src/config.ts';
 import { SourceError, toSourceError } from '../src/errors.ts';
 import { escapeHtml, formatDigest, snippet } from '../src/format.ts';
 import { takeDue } from '../src/group.ts';
-import { claimAlertRed, failureHint, recordFailure, recordSuccess, REALERT_AFTER_MS } from '../src/health.ts';
+import { claimAlertRed, failureHint, markAlertSent, recordFailure, recordSuccess, REALERT_AFTER_MS } from '../src/health.ts';
 import { requestJson } from '../src/http.ts';
 import { fetchFacebookPosts, parseFacebookPosts } from '../src/sources/facebook.ts';
 import { fetchInstagramPosts, parseInstagramMedia } from '../src/sources/instagram.ts';
@@ -151,6 +151,28 @@ describe('Meta', () => {
     assert.equal(posts[0]?.text, 'Пятеро детей');
     assert.equal(skipped, 1);
   });
+  it('Facebook: пустая или не-http ссылка заменяется запасной', () => {
+    const time = '2026-11-07T13:17:00+0000';
+    const { posts } = parseFacebookPosts({ id: 'facebook', type: 'facebook', label: 'Facebook', pageId: PAGE_ID }, {
+      data: [
+        { id: '1_2', created_time: time, permalink_url: '' },
+        { id: '1_3', created_time: time, permalink_url: 'javascript:alert(1)' },
+        { id: '1_4', created_time: time, permalink_url: 'https://www.facebook.com/p/4' },
+      ],
+    });
+    assert.deepEqual(
+      posts.map((p) => p.url),
+      ['https://www.facebook.com/1_2', 'https://www.facebook.com/1_3', 'https://www.facebook.com/p/4'],
+    );
+  });
+  it('одиночный суррогат в тексте не попадает в сообщение', () => {
+    const broken = `Пост ${String.fromCharCode(0xd83d)} обрезан`;
+    const [message] = formatDigest('Заголовок', [{ sourceId: 'vk', id: '1', url: 'https://vk.com/wall-1_1', publishedAt: 0, text: broken }], () => 'VK');
+    assert.ok(message);
+    // encodeURIComponent бросает URIError на одиночном суррогате — та же проверка, что у isWellFormed.
+    assert.doesNotThrow(() => encodeURIComponent(message.html), 'Telegram не примет текст с одиночным суррогатом');
+    assert.ok(message.html.includes(`Пост ${String.fromCharCode(0xfffd)} обрезан`));
+  });
   it('Instagram: без permalink ссылка строится по shortcode, без обоих — элемент считается пропущенным', () => {
     const source = { id: 'instagram', type: 'instagram', label: 'Instagram', pageId: PAGE_ID } as const;
     const time = '2026-11-07T13:17:00+0000';
@@ -233,22 +255,27 @@ describe('health', () => {
     const err = new SourceError('auth', 'x');
     assert.equal(recordFailure(s, err, 0), false);
     assert.equal(recordFailure(s, err, 1), true);
-    s.alertedAt = 1;
+    markAlertSent(s, 1);
     assert.equal(recordFailure(s, err, 2), false);
     assert.equal(recordFailure(s, err, 1 + REALERT_AFTER_MS), true);
     assert.equal(recordSuccess(s), true, 'после алерта успех — это починка');
     assert.equal(recordSuccess(s), true, 'пока уведомление о починке не доставлено, оно остаётся к отправке');
-    delete s.alertedAt; // так делает доставка уведомления
+    delete s.alertOpen; // так делает доставка уведомления
     assert.equal(recordSuccess(s), false);
     assert.equal(s.consecutiveFailures, 0);
   });
-  it('красный запуск из-за алерта — не чаще раза в сутки, починка сбрасывает отсчёт', () => {
+  it('успех не обнуляет суточные окна алерта и красного запуска', () => {
     const s = newSourceState();
-    assert.equal(claimAlertRed(s, 0), true);
-    assert.equal(claimAlertRed(s, REALERT_AFTER_MS - 1), false);
-    assert.equal(claimAlertRed(s, REALERT_AFTER_MS), true);
+    const err = new SourceError('network', 'x');
+    recordFailure(s, err, 0);
+    assert.equal(recordFailure(s, err, 1), true);
+    markAlertSent(s, 1);
+    assert.equal(claimAlertRed(s, 1), true);
     recordSuccess(s);
-    assert.equal(claimAlertRed(s, REALERT_AFTER_MS + 1), true);
+    recordFailure(s, err, 2);
+    assert.equal(recordFailure(s, err, 3), false, 'повторный алерт после мигания — не раньше суток');
+    assert.equal(claimAlertRed(s, 3), false);
+    assert.equal(claimAlertRed(s, 1 + REALERT_AFTER_MS), true);
   });
   it('подсказка называет нужный секрет', () => {
     assert.ok(failureHint('auth', VK).includes('VK_TOKEN'));
@@ -281,6 +308,14 @@ describe('state', () => {
     assert.doesNotThrow(() => parseState(withSource(source)));
     assert.throws(() => parseState(withSource({ ...source, seen: [1] })), /источник vk/);
     assert.throws(() => parseState(withSource({ ...source, consecutiveFailures: -1 })), /источник vk/);
+    assert.throws(() => parseState(withSource({ ...source, alertedAt: 'вчера' })), /источник vk/, 'иначе now - alertedAt = NaN и алерты глохнут');
+    assert.throws(() => parseState(withSource({ ...source, alertOpen: 'да' })), /источник vk/);
+    assert.doesNotThrow(() => parseState(withSource({ ...source, alertedAt: 5, alertOpen: true, alertRedAt: 5, watchingSince: 1 })));
+    const top = (extra: object) => JSON.stringify({ version: 1, sources: {}, pending: [], ...extra });
+    assert.throws(() => parseState(top({ telegram: 'сломан' })), /telegram/);
+    assert.throws(() => parseState(top({ telegram: { consecutiveFailures: 1, redAt: 'x' } })), /telegram/);
+    assert.throws(() => parseState(top({ keepaliveAt: 'x' })), /keepaliveAt/);
+    assert.doesNotThrow(() => parseState(top({ telegram: { consecutiveFailures: 0 }, keepaliveAt: 1 })));
     const dir = mkdtempSync(join(tmpdir(), 'radar-'));
     writeFileSync(join(dir, 's.json'), '[]');
     assert.throws(() => loadState(join(dir, 's.json')));
@@ -345,8 +380,8 @@ describe('config', () => {
   });
   it('sourceStateOf не отдаёт свойства прототипа', () => {
     const state = emptyState();
-    assert.throws(() => sourceStateOf(state, 'constructor'));
-    assert.equal(sourceStateOf(state, 'vk'), sourceStateOf(state, 'vk'), 'одно и то же состояние');
+    assert.throws(() => sourceStateOf(state, 'constructor', 0));
+    assert.equal(sourceStateOf(state, 'vk', 0), sourceStateOf(state, 'vk', 1), 'одно и то же состояние');
     assert.equal(Object.getPrototypeOf(state.sources), Object.prototype);
   });
 });

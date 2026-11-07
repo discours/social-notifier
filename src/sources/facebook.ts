@@ -1,6 +1,6 @@
 import { SourceError } from '../errors.ts';
 import type { FacebookSource, ParsedPosts, Post } from '../types.ts';
-import { asString, isRecord, parseGraphTime } from '../util.ts';
+import { asString, httpUrl, isRecord, parseGraphTime } from '../util.ts';
 import type { SourceContext } from './context.ts';
 import { graphGet } from './meta.ts';
 import { collectPosts } from './parse.ts';
@@ -42,7 +42,7 @@ export function parseFacebookPosts(source: FacebookSource, body: Record<string, 
       return {
         sourceId: source.id,
         id,
-        url: asString(item.permalink_url) ?? `https://www.facebook.com/${id}`,
+        url: httpUrl(item.permalink_url) ?? `https://www.facebook.com/${id}`,
         publishedAt,
         text: asString(item.message) ?? '',
       };

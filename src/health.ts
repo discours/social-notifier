@@ -5,7 +5,12 @@ import type { SourceConfig } from './types.ts';
 
 /** Алерт уходит со второго неудачного запуска подряд: разовый сбой сети не повод будить человека. */
 export const ALERT_AFTER_FAILURES = 2;
-/** Пока источник не чинится, алерт повторяется не чаще раза в сутки. */
+/**
+ * Алерт и красный запуск по одному источнику — не чаще раза в сутки. Отметки
+ * `alertedAt` и `alertRedAt` не сбрасываются успехом, а стареют: иначе
+ * источник, который сбоит через раз, слал бы алерт, «снова отвечает» и письмо
+ * GitHub каждые полчаса.
+ */
 export const REALERT_AFTER_MS = 24 * 60 * 60 * 1000;
 
 /** Отмечает неудачу. Возвращает true, если пора слать алерт. */
@@ -14,6 +19,12 @@ export function recordFailure(state: SourceState, err: SourceError, now: number)
   state.lastError = { kind: err.kind, message: err.message, at: now, ...(err.code ? { code: err.code } : {}) };
   if (state.consecutiveFailures < ALERT_AFTER_FAILURES) return false;
   return state.alertedAt === undefined || now - state.alertedAt >= REALERT_AFTER_MS;
+}
+
+/** Алерт доставлен: отсчёт суток до следующего и ожидание уведомления о починке. */
+export function markAlertSent(state: SourceState, now: number): void {
+  state.alertedAt = now;
+  state.alertOpen = true;
 }
 
 /**
@@ -29,16 +40,15 @@ export function claimAlertRed(state: SourceState, now: number): boolean {
 }
 
 /**
- * Отмечает успех. Возвращает true, если источник починился после доставленного
- * алерта и человеку надо об этом сказать. `alertedAt` снимает только доставка
- * уведомления о починке: если Telegram в этот момент недоступен, уведомление
- * повторится следующим успешным запуском.
+ * Отмечает успех. Возвращает true, если человек получил алерт и ещё не
+ * получил «снова отвечает». Флаг `alertOpen` снимает только доставка этого
+ * уведомления: если Telegram в этот момент недоступен, оно повторится
+ * следующим успешным запуском.
  */
 export function recordSuccess(state: SourceState): boolean {
   state.consecutiveFailures = 0;
   delete state.lastError;
-  delete state.alertRedAt;
-  return state.alertedAt !== undefined;
+  return state.alertOpen === true;
 }
 
 export function secretNameFor(source: SourceConfig): string {
@@ -58,8 +68,9 @@ export function failureHint(kind: FailureKind, source: SourceConfig): string {
       return `Проверь источник «${source.id}» в radar.config.json и секрет ${secret}.`;
     case 'network':
     case 'http':
-    case 'bad_response':
       return 'Сеть недоступна или отвечает ошибкой. Если алерт повторится через сутки, открой лог запуска.';
+    case 'bad_response':
+      return 'Ответ пришёл в неожиданном формате: возможно, сеть поменяла API, и радару нужна правка. Открой лог запуска.';
   }
 }
 

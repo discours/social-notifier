@@ -1,6 +1,6 @@
 import { SourceError } from '../errors.ts';
 import type { InstagramSource, ParsedPosts, Post } from '../types.ts';
-import { asString, isRecord, parseGraphTime } from '../util.ts';
+import { asString, httpUrl, isRecord, parseGraphTime } from '../util.ts';
 import type { SourceContext } from './context.ts';
 import { graphGet } from './meta.ts';
 import { collectPosts } from './parse.ts';
@@ -29,7 +29,7 @@ export async function fetchInstagramPosts(source: InstagramSource, ctx: SourceCo
 
 /** Ссылка на публикацию: permalink, а если Graph API его не отдал — по shortcode. */
 function mediaUrl(item: Record<string, unknown>): string | undefined {
-  const permalink = asString(item.permalink);
+  const permalink = httpUrl(item.permalink);
   if (permalink) return permalink;
   const shortcode = asString(item.shortcode);
   return shortcode && /^[A-Za-z0-9_-]+$/.test(shortcode) ? `https://www.instagram.com/p/${shortcode}/` : undefined;

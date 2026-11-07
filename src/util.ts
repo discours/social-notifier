@@ -19,6 +19,30 @@ export function parseGraphTime(value: unknown): number | undefined {
   return isPlausibleTime(ms) ? ms : undefined;
 }
 
+/**
+ * Ссылка из ответа API, если это настоящий http(s)-адрес: в нормализованном
+ * виде (`URL.href`). Пустая строка, `javascript:` и прочее — undefined, и
+ * адаптер берёт запасную ссылку.
+ */
+export function httpUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value === '') return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Заменяет одиночные суррогаты на U+FFFD. Текст из API бывает обрезан
+ * посередине эмодзи; Telegram такое сообщение отвергает (не UTF-8), и
+ * отвергнутое сообщение застряло бы первым в очереди.
+ */
+export function wellFormed(text: string): string {
+  return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, String.fromCharCode(0xfffd));
+}
+
 const EARLIEST_POST = Date.UTC(2000, 0, 1);
 const LATEST_POST = Date.UTC(2100, 0, 1);
 
