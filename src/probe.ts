@@ -32,13 +32,14 @@ async function main(): Promise<number> {
   log('== Источники ==');
   for (const source of config.sources) {
     try {
-      const posts = await fetchSourcePosts(source, ctx);
+      const { posts, skipped } = await fetchSourcePosts(source, ctx);
       const latest = posts.reduce<(typeof posts)[number] | undefined>(
         (best, p) => (best === undefined || p.publishedAt > best.publishedAt ? p : best),
         undefined,
       );
       const tail = latest ? `, последний ${new Date(latest.publishedAt).toISOString()} (id ${latest.id})` : '';
-      log(`${source.id}: OK, постов в ответе ${posts.length}${tail}`);
+      const skippedNote = skipped > 0 ? `, нераспознанных ${skipped}` : '';
+      log(`${source.id}: OK, постов в ответе ${posts.length}${skippedNote}${tail}`);
     } catch (err) {
       failed += 1;
       const e = toSourceError(err, redact);

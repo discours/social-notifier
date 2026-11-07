@@ -17,6 +17,8 @@ export interface SourceState {
   lastError?: { kind: FailureKind; code?: string; message: string; at: number };
   /** Когда последний раз ушёл алерт о поломке этого источника. */
   alertedAt?: number;
+  /** Когда запуск последний раз покраснел из-за алерта по этому источнику. */
+  alertRedAt?: number;
 }
 
 export interface TelegramHealth {
@@ -40,6 +42,17 @@ export interface RadarState {
 
 export function emptyState(): RadarState {
   return { version: STATE_VERSION, sources: {}, pending: [] };
+}
+
+/**
+ * Состояние источника по id. Имена свойств прототипа (`constructor`,
+ * `__proto__`) вернули бы чужой объект или подменили бы прототип; конфиг такие
+ * id и так отклоняет, здесь вторая линия.
+ */
+export function sourceStateOf(state: RadarState, id: string): SourceState {
+  if (id in Object.prototype) throw new Error(`недопустимый id источника: ${id}`);
+  if (!Object.hasOwn(state.sources, id)) state.sources[id] = newSourceState();
+  return state.sources[id] as SourceState;
 }
 
 export function newSourceState(): SourceState {
@@ -81,7 +94,13 @@ export function parseState(text: string): RadarState {
     throw new Error('файл состояния повреждён: нет sources или pending');
   }
   for (const [id, source] of Object.entries(raw.sources)) {
-    if (!isRecord(source) || typeof source.bootstrapped !== 'boolean' || !Array.isArray(source.seen)) {
+    if (
+      !isRecord(source) ||
+      typeof source.bootstrapped !== 'boolean' ||
+      !Array.isArray(source.seen) ||
+      !source.seen.every((s) => typeof s === 'string') ||
+      !isCount(source.consecutiveFailures)
+    ) {
       throw new Error(`файл состояния повреждён: источник ${id}`);
     }
   }
@@ -91,13 +110,18 @@ export function parseState(text: string): RadarState {
       typeof post.sourceId !== 'string' ||
       typeof post.id !== 'string' ||
       typeof post.url !== 'string' ||
-      typeof post.publishedAt !== 'number' ||
-      typeof post.detectedAt !== 'number'
+      typeof post.text !== 'string' ||
+      !Number.isFinite(post.publishedAt) ||
+      !Number.isFinite(post.detectedAt)
     ) {
       throw new Error('файл состояния повреждён: пост в очереди');
     }
   }
   return raw as unknown as RadarState;
+}
+
+function isCount(value: unknown): boolean {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }
 
 export function saveState(path: string, state: RadarState): void {

@@ -67,6 +67,11 @@ export class FakeWorld {
   fail: Partial<Record<'vk' | 'graph' | 'telegram', Failure>> = {};
   sent: { chatId: string; text: string; previewDisabled: boolean }[] = [];
   calls: Call[] = [];
+  /** Чаты, которым Telegram отказывает (403, как при заблокированном боте). */
+  blockedChats = new Set<string>();
+  /** Номера вызовов sendMessage (с единицы, сквозная нумерация), на которых Telegram отвечает 500. */
+  telegramFailOnCall = new Set<number>();
+  private telegramCalls = 0;
 
   addVk(id: number, publishedAt: number, text = `VK пост ${id}`): void {
     this.vk.unshift({ id, date: Math.floor(publishedAt / 1000), text });
@@ -111,6 +116,13 @@ export class FakeWorld {
     if (url.hostname === 'api.telegram.org') {
       return this.respond('telegram', () => {
         const payload = JSON.parse(body) as { chat_id: string; text: string; link_preview_options: { is_disabled: boolean } };
+        this.telegramCalls += 1;
+        if (this.telegramFailOnCall.has(this.telegramCalls)) {
+          return json({ ok: false, error_code: 500, description: 'Internal Server Error' }, 500);
+        }
+        if (this.blockedChats.has(payload.chat_id)) {
+          return json({ ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' }, 403);
+        }
         this.sent.push({
           chatId: payload.chat_id,
           text: payload.text,

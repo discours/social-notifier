@@ -27,7 +27,9 @@ jobs:
   radar:
     if: github.event_name == 'workflow_dispatch' || vars.RADAR_ENABLED == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # С запасом: если задачу убьют до сохранения состояния, отправленные посты
+    # придут повторно.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -37,12 +39,27 @@ jobs:
 
       - name: Подключить ветку состояния
         run: |
-          if git ls-remote --exit-code --heads origin state >/dev/null; then
+          # Код 2 — ветки нет (первый запуск); любой другой ненулевой — сбой сети
+          # или доступа, и тогда новую ветку создавать нельзя.
+          set +e
+          git ls-remote --exit-code --heads origin state >/dev/null
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
             git fetch --quiet --depth=1 origin state
             git worktree add --quiet --detach state-store FETCH_HEAD
-          else
+            # Ветка есть, а файла нет — кто-то её почистил. Пустое состояние
+            # здесь потеряло бы очередь, поэтому стоп, а не первый запуск.
+            if [ ! -f state-store/state.json ]; then
+              echo "::error::в ветке state нет state.json; восстановите его или удалите ветку целиком"
+              exit 1
+            fi
+          elif [ "$code" -eq 2 ]; then
             echo "ветки state ещё нет, первый запуск создаст её"
             git worktree add --quiet --orphan -b state state-store
+          else
+            echo "::error::не удалось проверить ветку state (git ls-remote, код $code)"
+            exit 1
           fi
 
       - name: Радар
@@ -76,11 +93,13 @@ jobs:
           git push --quiet origin HEAD:refs/heads/state
 
       # GitHub выключает расписание публичного репозитория после 60 дней без
-      # активности. Повторное включение уже включённого workflow ничего не
-      # меняет, кроме этого счётчика, и не создаёт коммитов.
+      # «активности репозитория»; что именно считается активностью, GitHub не
+      # уточняет. Две страховки без гарантии: коммиты в ветку state (при новых
+      # постах и раз в 25 дней) и повторное включение workflow через API.
+      # Сбой шага не красит запуск, но виден в логе.
       - name: Не дать расписанию уснуть
         if: always() && github.event_name == 'schedule'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api --method PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/radar.yml/enable" --silent
+        run: gh api --method PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/radar.yml/enable"

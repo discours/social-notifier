@@ -1,12 +1,13 @@
 import { SourceError, type FailureKind } from '../errors.ts';
 import { requestJson } from '../http.ts';
-import type { Post, VkSource } from '../types.ts';
-import { asString, isRecord } from '../util.ts';
+import type { ParsedPosts, Post, VkSource } from '../types.ts';
+import { asString, isPlausibleTime, isRecord } from '../util.ts';
 import type { SourceContext } from './context.ts';
+import { collectPosts } from './parse.ts';
 
 export const VK_WALL_GET_URL = 'https://api.vk.com/method/wall.get';
 
-export async function fetchVkPosts(source: VkSource, ctx: SourceContext): Promise<Post[]> {
+export async function fetchVkPosts(source: VkSource, ctx: SourceContext): Promise<ParsedPosts> {
   const token = ctx.secrets.vkToken;
   if (!token) throw new SourceError('config', 'не задан секрет VK_TOKEN');
   // Токен уходит в теле POST-запроса, а не в URL.
@@ -25,7 +26,7 @@ export async function fetchVkPosts(source: VkSource, ctx: SourceContext): Promis
   return parseVkWall(source, status, body);
 }
 
-export function parseVkWall(source: VkSource, status: number, body: unknown): Post[] {
+export function parseVkWall(source: VkSource, status: number, body: unknown): ParsedPosts {
   if (isRecord(body) && isRecord(body.error)) {
     const code = Number(body.error.error_code);
     const message = asString(body.error.error_msg) ?? 'без описания';
@@ -36,21 +37,23 @@ export function parseVkWall(source: VkSource, status: number, body: unknown): Po
   const items = isRecord(response) ? response.items : undefined;
   if (!Array.isArray(items)) throw new SourceError('bad_response', 'в ответе VK нет списка постов');
 
-  const posts: Post[] = [];
-  for (const item of items) {
-    if (!isRecord(item)) continue;
-    const id = asString(item.id);
-    const date = typeof item.date === 'number' ? item.date : undefined;
-    if (!id || date === undefined) continue;
-    posts.push({
-      sourceId: source.id,
-      id,
-      url: `https://vk.com/wall${source.ownerId}_${id}`,
-      publishedAt: date * 1000,
-      text: vkText(item),
-    });
-  }
-  return posts;
+  return collectPosts(
+    items,
+    (item): Post | undefined => {
+      if (!isRecord(item)) return undefined;
+      const id = asString(item.id);
+      const publishedAt = typeof item.date === 'number' ? item.date * 1000 : undefined;
+      if (!id || !/^\d+$/.test(id) || !isPlausibleTime(publishedAt)) return undefined;
+      return {
+        sourceId: source.id,
+        id,
+        url: `https://vk.com/wall${source.ownerId}_${id}`,
+        publishedAt,
+        text: vkText(item),
+      };
+    },
+    'VK',
+  );
 }
 
 /** Текст поста, а у репоста без своего текста — текст исходной записи. */

@@ -1,8 +1,9 @@
 import { SourceError } from '../errors.ts';
-import type { FacebookSource, Post } from '../types.ts';
+import type { FacebookSource, ParsedPosts, Post } from '../types.ts';
 import { asString, isRecord, parseGraphTime } from '../util.ts';
 import type { SourceContext } from './context.ts';
 import { graphGet } from './meta.ts';
+import { collectPosts } from './parse.ts';
 
 /**
  * Посты страницы читаются токеном страницы: Graph API выдаёт его в обмен на
@@ -10,7 +11,7 @@ import { graphGet } from './meta.ts';
  * живёт только в памяти запуска и, как и META_TOKEN, уходит лишь в заголовке;
  * в тексты ошибок он не попадёт — редактор вычищает любые длинные токены.
  */
-export async function fetchFacebookPosts(source: FacebookSource, ctx: SourceContext): Promise<Post[]> {
+export async function fetchFacebookPosts(source: FacebookSource, ctx: SourceContext): Promise<ParsedPosts> {
   const page = await graphGet(ctx, source.pageId, { fields: 'access_token' });
   const pageToken = asString(page.access_token);
   if (!pageToken) {
@@ -28,22 +29,24 @@ export async function fetchFacebookPosts(source: FacebookSource, ctx: SourceCont
   return parseFacebookPosts(source, body);
 }
 
-export function parseFacebookPosts(source: FacebookSource, body: Record<string, unknown>): Post[] {
+export function parseFacebookPosts(source: FacebookSource, body: Record<string, unknown>): ParsedPosts {
   const data = body.data;
   if (!Array.isArray(data)) throw new SourceError('bad_response', 'в ответе Facebook нет списка постов');
-  const posts: Post[] = [];
-  for (const item of data) {
-    if (!isRecord(item)) continue;
-    const id = asString(item.id);
-    const publishedAt = parseGraphTime(item.created_time);
-    if (!id || publishedAt === undefined) continue;
-    posts.push({
-      sourceId: source.id,
-      id,
-      url: asString(item.permalink_url) ?? `https://www.facebook.com/${id}`,
-      publishedAt,
-      text: asString(item.message) ?? '',
-    });
-  }
-  return posts;
+  return collectPosts(
+    data,
+    (item): Post | undefined => {
+      if (!isRecord(item)) return undefined;
+      const id = asString(item.id);
+      const publishedAt = parseGraphTime(item.created_time);
+      if (!id || !/^[\d_]+$/.test(id) || publishedAt === undefined) return undefined;
+      return {
+        sourceId: source.id,
+        id,
+        url: asString(item.permalink_url) ?? `https://www.facebook.com/${id}`,
+        publishedAt,
+        text: asString(item.message) ?? '',
+      };
+    },
+    'Facebook',
+  );
 }

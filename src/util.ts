@@ -16,7 +16,19 @@ export function asString(value: unknown): string | undefined {
 export function parseGraphTime(value: unknown): number | undefined {
   if (typeof value !== 'string') return undefined;
   const ms = Date.parse(value.replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
-  return Number.isNaN(ms) ? undefined : ms;
+  return isPlausibleTime(ms) ? ms : undefined;
+}
+
+const EARLIEST_POST = Date.UTC(2000, 0, 1);
+const LATEST_POST = Date.UTC(2100, 0, 1);
+
+/**
+ * Время поста — конечное число в разумных пределах. Иначе мусорное значение
+ * из API (огромное число, Infinity) попало бы в очередь, в JSON стало бы null
+ * и сломало бы чтение состояния во всех следующих запусках.
+ */
+export function isPlausibleTime(ms: unknown): ms is number {
+  return typeof ms === 'number' && Number.isFinite(ms) && ms >= EARLIEST_POST && ms <= LATEST_POST;
 }
 
 const MIN_SECRET_LENGTH = 6;

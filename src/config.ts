@@ -3,6 +3,7 @@ import type { RadarConfig, SourceConfig } from './types.ts';
 import { isRecord } from './util.ts';
 
 const SOURCE_ID = /^[a-z0-9_-]{1,32}$/;
+const MAX_TITLE_LENGTH = 256;
 // ID страниц и аккаунтов подставляются в путь запроса, поэтому только цифры.
 const NUMERIC_ID = /^\d{5,25}$/;
 
@@ -42,6 +43,10 @@ export function parseConfig(raw: unknown): RadarConfig {
     vkApiVersion: text('vkApiVersion'),
     sources: [],
   };
+  // Заголовок повторяется в каждом куске дайджеста: длинный не оставил бы места постам.
+  if (config.messageTitle.length > MAX_TITLE_LENGTH) {
+    errors.push(`messageTitle: не длиннее ${MAX_TITLE_LENGTH} символов`);
+  }
   if (config.graphApiVersion && !/^v\d+\.\d+$/.test(config.graphApiVersion)) {
     errors.push('graphApiVersion: формат v25.0');
   }
@@ -72,8 +77,8 @@ function parseSource(item: unknown, where: string, errors: string[]): SourceConf
     return undefined;
   }
   const { id, label, type } = item;
-  if (typeof id !== 'string' || !SOURCE_ID.test(id)) {
-    errors.push(`${where}.id: латиница в нижнем регистре, цифры, «-» и «_», до 32 символов`);
+  if (typeof id !== 'string' || !SOURCE_ID.test(id) || id in Object.prototype) {
+    errors.push(`${where}.id: латиница в нижнем регистре, цифры, «-» и «_», до 32 символов; не служебное имя вроде constructor`);
     return undefined;
   }
   if (typeof label !== 'string' || label.trim() === '' || label.length > 32) {

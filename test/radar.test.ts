@@ -23,8 +23,8 @@ function deps(world: FakeWorld, now: number, extra: Partial<RadarDeps> = {}): Ra
 async function bootstrapped(): Promise<{ world: FakeWorld; state: RadarState }> {
   const world = new FakeWorld();
   world.addVk(100, T0 - 5 * HOUR);
-  world.addFb('fb-1', T0 - 4 * HOUR);
-  world.addIg('ig-1', T0 - 3 * HOUR);
+  world.addFb('1_1', T0 - 4 * HOUR);
+  world.addIg('9001', T0 - 3 * HOUR);
   const state = emptyState();
   const result = await runRadar(state, deps(world, T0 - 30 * MINUTE));
   assert.equal(result.exitCode, 0);
@@ -37,8 +37,8 @@ describe('runRadar: первый запуск', () => {
   it('запоминает текущие посты и ничего не отправляет', async () => {
     const world = new FakeWorld();
     world.addVk(100, T0 - HOUR);
-    world.addFb('fb-1', T0 - HOUR);
-    world.addIg('ig-1', T0 - HOUR);
+    world.addFb('1_1', T0 - HOUR);
+    world.addIg('9001', T0 - HOUR);
     const state = emptyState();
 
     const result = await runRadar(state, deps(world, T0));
@@ -47,8 +47,8 @@ describe('runRadar: первый запуск', () => {
     assert.equal(world.sent.length, 0);
     assert.deepEqual(state.pending, []);
     assert.deepEqual(state.sources.vk?.seen, ['100']);
-    assert.deepEqual(state.sources.facebook?.seen, ['fb-1']);
-    assert.deepEqual(state.sources.instagram?.seen, ['ig-1']);
+    assert.deepEqual(state.sources.facebook?.seen, ['1_1']);
+    assert.deepEqual(state.sources.instagram?.seen, ['9001']);
     assert.equal(state.sources.vk?.bootstrapped, true);
   });
 });
@@ -62,8 +62,8 @@ describe('runRadar: группировка', () => {
     assert.equal(world.sent.length, 0, 'окно ещё открыто');
     assert.equal(state.pending.length, 1);
 
-    world.addIg('ig-2', T0 + 3 * MINUTE, 'Дом — это люди (IG)');
-    world.addFb('fb-2', T0 + 7 * MINUTE, 'Пятеро детей — не повод');
+    world.addIg('9002', T0 + 3 * MINUTE, 'Дом — это люди (IG)');
+    world.addFb('1_2', T0 + 7 * MINUTE, 'Пятеро детей — не повод');
     await runRadar(state, deps(world, T0 + 8 * MINUTE));
     assert.equal(world.sent.length, 0, 'окно ещё открыто');
     assert.equal(state.pending.length, 3);
@@ -203,8 +203,95 @@ describe('runRadar: алерты', () => {
 
     const stored = JSON.stringify(state);
     assert.ok(!stored.includes(SECRETS.metaToken ?? '-'), 'нет в состоянии');
-    assert.ok(world.alertMessages().every((m) => !m.includes(SECRETS.metaToken ?? '-')), 'нет в алерте');
+    const alerts = world.alertMessages();
+    assert.equal(alerts.length, 2, 'алерты дошли — проверка ниже не пустая');
+    assert.ok(alerts.every((m) => !m.includes(SECRETS.metaToken ?? '-')), 'нет в алерте');
+    assert.ok(alerts.every((m) => m.includes('[секрет]')), 'текст ошибки сохранился, вычищен только токен');
     assert.ok(stored.includes('[секрет]'));
+  });
+
+  it('чат алертов не принимает сообщения: алерт повторяется, но красный запуск — раз в сутки', async () => {
+    const { world, state } = await bootstrapped();
+    world.fail.graph = json({ error: { code: 190, message: 'session invalidated' } }, 400);
+    world.blockedChats.add(SECRETS.telegramAlertChatId ?? '-');
+
+    const codes: number[] = [];
+    for (let i = 0; i < 6; i += 1) codes.push((await runRadar(state, deps(world, T0 + i * 10 * MINUTE))).exitCode);
+    assert.deepEqual(codes, [0, 1, 0, 0, 0, 0]);
+    assert.equal(world.alertMessages().length, 0);
+
+    world.blockedChats.clear();
+    await runRadar(state, deps(world, T0 + 60 * MINUTE));
+    assert.equal(world.alertMessages().length, 2, 'алерт дошёл, как только чат открылся');
+
+    const later = await runRadar(state, deps(world, T0 + 25 * HOUR));
+    assert.equal(later.exitCode, 1, 'через сутки поломка снова красит запуск');
+  });
+
+  it('уведомление о починке не теряется, если Telegram в этот момент недоступен', async () => {
+    const { world, state } = await bootstrapped();
+    world.fail.graph = json({ error: { code: 190, message: 'session invalidated' } }, 400);
+    await runRadar(state, deps(world, T0));
+    await runRadar(state, deps(world, T0 + 10 * MINUTE));
+    assert.equal(world.alertMessages().length, 2);
+
+    delete world.fail.graph;
+    world.blockedChats.add(SECRETS.telegramAlertChatId ?? '-');
+    await runRadar(state, deps(world, T0 + 20 * MINUTE));
+    assert.equal(world.alertMessages().length, 2, 'Telegram недоступен — уведомление не ушло');
+
+    world.blockedChats.clear();
+    await runRadar(state, deps(world, T0 + 30 * MINUTE));
+    const recovery = world.alertMessages().slice(2);
+    assert.equal(recovery.length, 2);
+    assert.ok(recovery.every((m) => m.includes('снова отвечает')));
+
+    await runRadar(state, deps(world, T0 + 40 * MINUTE));
+    assert.equal(world.alertMessages().length, 4, 'и не повторяется после доставки');
+  });
+
+  it('Instagram поменял формат ответа — это сбой источника, а не тишина', async () => {
+    const { world, state } = await bootstrapped();
+    world.ig = [{ id: 'не число', timestamp: 'вчера', permalink: 'https://www.instagram.com/p/x/' }];
+
+    await runRadar(state, deps(world, T0));
+    await runRadar(state, deps(world, T0 + 10 * MINUTE));
+
+    assert.equal(state.sources.instagram?.lastError?.kind, 'bad_response');
+    assert.equal(world.alertMessages().length, 1);
+  });
+});
+
+describe('runRadar: длинный дайджест', () => {
+  it('Telegram отказал посередине — повторяется только недоставленный остаток', async () => {
+    const { world, state } = await bootstrapped();
+    for (let i = 0; i < 40; i += 1) world.addVk(200 + i, T0 - 30 * MINUTE + i * 1000, `Длинный заголовок поста ${i} `.repeat(6));
+    world.telegramFailOnCall.add(2);
+
+    const first = await runRadar(state, deps(world, T0));
+    assert.equal(first.exitCode, 1);
+    const delivered = first.postsSent;
+    assert.ok(delivered > 0 && delivered < 40, `первое сообщение ушло (${delivered} постов), второе нет`);
+    assert.equal(state.pending.length, 40 - delivered, 'с очереди сняты только доставленные');
+
+    await runRadar(state, deps(world, T0 + 10 * MINUTE));
+    const text = world.postsMessages().join('\n');
+    for (let i = 0; i < 40; i += 1) {
+      const occurrences = text.split(`wall-89236419_${200 + i}"`).length - 1;
+      assert.equal(occurrences, 1, `пост ${200 + i} доставлен ровно один раз`);
+    }
+    assert.deepEqual(state.pending, []);
+  });
+
+  it('один и тот же пост дважды в ответе API — одна строка в сообщении', async () => {
+    const { world, state } = await bootstrapped();
+    world.addVk(101, T0 - 20 * MINUTE);
+    world.addVk(101, T0 - 20 * MINUTE);
+
+    await runRadar(state, deps(world, T0));
+
+    const text = world.postsMessages().join('\n');
+    assert.equal(text.split('wall-89236419_101"').length - 1, 1);
   });
 });
 

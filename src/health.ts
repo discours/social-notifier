@@ -16,13 +16,29 @@ export function recordFailure(state: SourceState, err: SourceError, now: number)
   return state.alertedAt === undefined || now - state.alertedAt >= REALERT_AFTER_MS;
 }
 
-/** Отмечает успех. Возвращает true, если источник починился после алерта. */
+/**
+ * Красный запуск из-за алерта — не чаще раза в сутки. Сам алерт повторяется
+ * каждый запуск, пока не дойдёт; но если чат алертов его не принимает (бот
+ * заблокирован, никто не нажал /start), письмо GitHub каждые 10 минут ничего
+ * не добавит. Отметка ставится при попытке, а не при доставке.
+ */
+export function claimAlertRed(state: SourceState, now: number): boolean {
+  if (state.alertRedAt !== undefined && now - state.alertRedAt < REALERT_AFTER_MS) return false;
+  state.alertRedAt = now;
+  return true;
+}
+
+/**
+ * Отмечает успех. Возвращает true, если источник починился после доставленного
+ * алерта и человеку надо об этом сказать. `alertedAt` снимает только доставка
+ * уведомления о починке: если Telegram в этот момент недоступен, уведомление
+ * повторится следующим успешным запуском.
+ */
 export function recordSuccess(state: SourceState): boolean {
-  const recovered = state.alertedAt !== undefined;
   state.consecutiveFailures = 0;
   delete state.lastError;
-  delete state.alertedAt;
-  return recovered;
+  delete state.alertRedAt;
+  return state.alertedAt !== undefined;
 }
 
 export function secretNameFor(source: SourceConfig): string {

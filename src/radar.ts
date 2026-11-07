@@ -2,6 +2,7 @@ import { describeError, toSourceError } from './errors.ts';
 import { formatDigest, type OutgoingMessage } from './format.ts';
 import { postKey, takeDue } from './group.ts';
 import {
+  claimAlertRed,
   formatFailureAlert,
   formatRecoveryNotice,
   recordFailure,
@@ -10,9 +11,9 @@ import {
 } from './health.ts';
 import type { FetchLike } from './http.ts';
 import { fetchSourcePosts } from './sources/index.ts';
-import { newSourceState, rememberSeen, type RadarState } from './state.ts';
+import { rememberSeen, sourceStateOf, type RadarState } from './state.ts';
 import { sendTelegramMessage } from './telegram.ts';
-import type { Post, RadarConfig, Secrets } from './types.ts';
+import type { ParsedPosts, RadarConfig, Secrets } from './types.ts';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -43,27 +44,31 @@ export interface RadarResult {
 
 interface Alert {
   message: OutgoingMessage;
-  onSent?: () => void;
+  onSent: () => void;
 }
 
 /**
  * Один запуск радара: опросить источники, поставить новые посты в очередь,
  * отправить очередь, если окно группировки закрылось, и разослать алерты.
  * Меняет `state` на месте; сохраняет его вызывающий.
+ *
+ * Гарантия доставки — «хотя бы раз»: пост снимается с очереди после того, как
+ * Telegram принял его сообщение, но состояние сохраняется уже после запуска.
+ * Если сохранить его не удалось, следующий запуск пришлёт те же посты снова.
  */
 export async function runRadar(state: RadarState, deps: RadarDeps): Promise<RadarResult> {
   const { config, log } = deps;
   const now = deps.now();
   const ctx = { config, secrets: deps.secrets, fetch: deps.fetch };
   const alerts: Alert[] = [];
-  let alertDue = false;
+  let alertRed = false;
 
   for (const source of config.sources) {
-    const sourceState = (state.sources[source.id] ??= newSourceState());
+    const sourceState = sourceStateOf(state, source.id);
 
-    let posts: Post[];
+    let parsed: ParsedPosts;
     try {
-      posts = await fetchSourcePosts(source, ctx);
+      parsed = await fetchSourcePosts(source, ctx);
     } catch (err) {
       const error = toSourceError(err, deps.redact);
       const shouldAlert = recordFailure(sourceState, error, now);
@@ -72,7 +77,7 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
           `подряд ${sourceState.consecutiveFailures}`,
       );
       if (shouldAlert) {
-        alertDue = true;
+        if (claimAlertRed(sourceState, now)) alertRed = true;
         alerts.push({
           message: formatFailureAlert(source, error, sourceState.consecutiveFailures, deps.runUrl),
           onSent: () => {
@@ -83,12 +88,22 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
       continue;
     }
 
-    if (recordSuccess(sourceState)) alerts.push({ message: formatRecoveryNotice(source) });
+    if (recordSuccess(sourceState)) {
+      alerts.push({
+        message: formatRecoveryNotice(source),
+        onSent: () => {
+          delete sourceState.alertedAt;
+        },
+      });
+    }
+
+    const { posts, skipped } = parsed;
+    const skippedNote = skipped > 0 ? `, нераспознанных элементов ${skipped}` : '';
 
     if (!sourceState.bootstrapped) {
       sourceState.bootstrapped = true;
       rememberSeen(sourceState, posts.map((p) => p.id));
-      log(`${source.id}: первый запуск, запомнено постов без уведомления: ${posts.length}`);
+      log(`${source.id}: первый запуск, запомнено постов без уведомления: ${posts.length}${skippedNote}`);
       continue;
     }
 
@@ -102,12 +117,14 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
         log(`${source.id}: пост ${post.id} старше ${config.maxPostAgeHours} ч, пропущен`);
         continue;
       }
-      if (queued.has(postKey(post))) continue;
+      const key = postKey(post);
+      if (queued.has(key)) continue;
+      queued.add(key);
       state.pending.push({ ...post, detectedAt: now });
       added += 1;
     }
     rememberSeen(sourceState, fresh.map((p) => p.id));
-    log(`${source.id}: получено ${posts.length}, новых в очереди ${added}`);
+    log(`${source.id}: получено ${posts.length}, новых в очереди ${added}${skippedNote}`);
   }
 
   const labels = new Map(config.sources.map((s) => [s.id, s.label]));
@@ -124,7 +141,7 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
   if (deps.dryRun) {
     for (const message of digest) log(`[dry-run] в чат:\n${message.html}`);
     for (const alert of alerts) log(`[dry-run] в чат алертов:\n${alert.message.html}`);
-    return { exitCode: alertDue ? 1 : 0, postsSent: 0, alertsSent: 0 };
+    return { exitCode: alertRed ? 1 : 0, postsSent: 0, alertsSent: 0 };
   }
 
   const token = deps.secrets.telegramBotToken;
@@ -136,23 +153,27 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
 
   let telegramError: string | undefined;
   let postsSent = 0;
-  if (due && digest.length > 0) {
-    try {
-      for (const message of digest) await send(chatId, message);
-      const sent = new Set(due.map(postKey));
+  let messagesSent = 0;
+  try {
+    // Посты снимаются с очереди после каждого доставленного сообщения: если
+    // Telegram откажет посередине длинного дайджеста, повторится только остаток.
+    for (const message of digest) {
+      await send(chatId, message);
+      const sent = new Set(message.posts.map(postKey));
       state.pending = state.pending.filter((p) => !sent.has(postKey(p)));
-      postsSent = due.length;
-      log(`отправлено постов: ${due.length}, сообщений: ${digest.length}`);
-    } catch (err) {
-      telegramError = describeError(err, deps.redact);
+      postsSent += message.posts.length;
+      messagesSent += 1;
     }
+  } catch (err) {
+    telegramError = describeError(err, deps.redact);
   }
+  if (messagesSent > 0) log(`отправлено постов: ${postsSent}, сообщений: ${messagesSent}`);
 
   let alertsSent = 0;
   for (const alert of alerts) {
     try {
       await send(alertChatId, alert.message);
-      alert.onSent?.();
+      alert.onSent();
       alertsSent += 1;
     } catch (err) {
       telegramError ??= describeError(err, deps.redact);
@@ -176,5 +197,5 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
     delete telegram.redAt;
   }
 
-  return { exitCode: alertDue || telegramRed ? 1 : 0, postsSent, alertsSent };
+  return { exitCode: alertRed || telegramRed ? 1 : 0, postsSent, alertsSent };
 }

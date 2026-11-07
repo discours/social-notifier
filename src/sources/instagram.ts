@@ -1,15 +1,16 @@
 import { SourceError } from '../errors.ts';
-import type { InstagramSource, Post } from '../types.ts';
+import type { InstagramSource, ParsedPosts, Post } from '../types.ts';
 import { asString, isRecord, parseGraphTime } from '../util.ts';
 import type { SourceContext } from './context.ts';
 import { graphGet } from './meta.ts';
+import { collectPosts } from './parse.ts';
 
 /**
  * Instagram читается через Graph API: сначала у страницы Facebook берётся
  * привязанный профессиональный аккаунт, затем его последние публикации
  * (посты, карусели и Reels; сторис сюда не входят).
  */
-export async function fetchInstagramPosts(source: InstagramSource, ctx: SourceContext): Promise<Post[]> {
+export async function fetchInstagramPosts(source: InstagramSource, ctx: SourceContext): Promise<ParsedPosts> {
   const page = await graphGet(ctx, source.pageId, { fields: 'instagram_business_account' });
   const account = isRecord(page.instagram_business_account) ? asString(page.instagram_business_account.id) : undefined;
   if (!account) {
@@ -20,23 +21,33 @@ export async function fetchInstagramPosts(source: InstagramSource, ctx: SourceCo
   }
   if (!/^\d+$/.test(account)) throw new SourceError('bad_response', 'ID аккаунта Instagram не число');
   const body = await graphGet(ctx, `${account}/media`, {
-    fields: 'id,permalink,timestamp,caption',
+    fields: 'id,permalink,shortcode,timestamp,caption',
     limit: String(ctx.config.fetchLimit),
   });
   return parseInstagramMedia(source, body);
 }
 
-export function parseInstagramMedia(source: InstagramSource, body: Record<string, unknown>): Post[] {
+/** Ссылка на публикацию: permalink, а если Graph API его не отдал — по shortcode. */
+function mediaUrl(item: Record<string, unknown>): string | undefined {
+  const permalink = asString(item.permalink);
+  if (permalink) return permalink;
+  const shortcode = asString(item.shortcode);
+  return shortcode && /^[A-Za-z0-9_-]+$/.test(shortcode) ? `https://www.instagram.com/p/${shortcode}/` : undefined;
+}
+
+export function parseInstagramMedia(source: InstagramSource, body: Record<string, unknown>): ParsedPosts {
   const data = body.data;
   if (!Array.isArray(data)) throw new SourceError('bad_response', 'в ответе Instagram нет списка публикаций');
-  const posts: Post[] = [];
-  for (const item of data) {
-    if (!isRecord(item)) continue;
-    const id = asString(item.id);
-    const url = asString(item.permalink);
-    const publishedAt = parseGraphTime(item.timestamp);
-    if (!id || !url || publishedAt === undefined) continue;
-    posts.push({ sourceId: source.id, id, url, publishedAt, text: asString(item.caption) ?? '' });
-  }
-  return posts;
+  return collectPosts(
+    data,
+    (item): Post | undefined => {
+      if (!isRecord(item)) return undefined;
+      const id = asString(item.id);
+      const url = mediaUrl(item);
+      const publishedAt = parseGraphTime(item.timestamp);
+      if (!id || !/^\d+$/.test(id) || !url || publishedAt === undefined) return undefined;
+      return { sourceId: source.id, id, url, publishedAt, text: asString(item.caption) ?? '' };
+    },
+    'Instagram',
+  );
 }

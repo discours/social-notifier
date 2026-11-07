@@ -51,6 +51,12 @@ export interface Post {
   text: string;
 }
 
+/** Разобранный ответ источника: посты и число элементов, которые разобрать не удалось. */
+export interface ParsedPosts {
+  posts: Post[];
+  skipped: number;
+}
+
 export interface PendingPost extends Post {
   /** Когда радар впервые увидел пост, мс. */
   detectedAt: number;

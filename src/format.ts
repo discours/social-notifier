@@ -29,6 +29,11 @@ export function snippet(text: string, max = SNIPPET_LENGTH): string {
   return `${trimmed.trimEnd()}…`;
 }
 
+/** Сообщение дайджеста и посты в нём: после доставки они снимаются с очереди. */
+export interface DigestMessage extends OutgoingMessage {
+  posts: Post[];
+}
+
 /**
  * Сообщение о новых постах: заголовок и по строке на пост. Если всё не влезает
  * в одно сообщение Telegram, остаток уходит следующими. Превью ссылки
@@ -39,24 +44,21 @@ export function formatDigest(
   posts: readonly Post[],
   labelOf: (sourceId: string) => string,
   limit = TELEGRAM_TEXT_LIMIT,
-): OutgoingMessage[] {
+): DigestMessage[] {
   const header = `${escapeHtml(title)}\n`;
-  const lines = posts.map((post) => {
+  const chunks: { html: string; posts: Post[] }[] = [];
+  let current: { html: string; posts: Post[] } = { html: header, posts: [] };
+  for (const post of posts) {
     const label = escapeHtml(labelOf(post.sourceId));
     const text = escapeHtml(snippet(post.text) || 'пост без подписи');
-    return `\n<b>${label}</b>: <a href="${escapeHtml(post.url)}">${text}</a>`;
-  });
-
-  const chunks: { html: string; count: number }[] = [];
-  let current = { html: header, count: 0 };
-  for (const line of lines) {
-    if (current.count > 0 && current.html.length + line.length > limit) {
+    const line = `\n<b>${label}</b>: <a href="${escapeHtml(post.url)}">${text}</a>`;
+    if (current.posts.length > 0 && current.html.length + line.length > limit) {
       chunks.push(current);
-      current = { html: header, count: 0 };
+      current = { html: header, posts: [] };
     }
     current.html += line;
-    current.count += 1;
+    current.posts.push(post);
   }
-  if (current.count > 0) chunks.push(current);
-  return chunks.map((c) => ({ html: c.html, disablePreview: c.count > 1 }));
+  if (current.posts.length > 0) chunks.push(current);
+  return chunks.map((c) => ({ html: c.html, disablePreview: c.posts.length > 1, posts: c.posts }));
 }
