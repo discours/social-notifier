@@ -14,7 +14,8 @@ import { fetchInstagramPosts, parseInstagramMedia } from '../src/sources/instagr
 import { classifyGraphError } from '../src/sources/meta.ts';
 import { classifyVkError, fetchVkPosts, parseVkWall } from '../src/sources/vk.ts';
 import { emptyState, loadState, newSourceState, parseState, rememberSeen, saveState, SEEN_LIMIT, sourceStateOf } from '../src/state.ts';
-import { sendTelegramMessage } from '../src/telegram.ts';
+import type { FetchLike } from '../src/http.ts';
+import { botCanPost, checkChatAccess, getBotIdentity, sendTelegramMessage, TelegramError } from '../src/telegram.ts';
 import type { PendingPost, Post, VkSource } from '../src/types.ts';
 import { makeRedactor, parseGraphTime } from '../src/util.ts';
 import { FakeWorld, MINUTE, PAGE_ID, PAGE_TOKEN, SECRETS, json, redact, testConfig } from './helpers.ts';
@@ -423,5 +424,75 @@ describe('секреты и сеть', () => {
     });
     assert.equal(calls, 2);
     assert.deepEqual(slept, [3000]);
+  });
+});
+
+describe('Telegram: доступ к чату', () => {
+  /** Поддельный Bot API: отвечает на getChat и getChatMember, запоминает вызванные методы. */
+  function botApi(chat: unknown, member: unknown = {}) {
+    const methods: string[] = [];
+    const fetchFn: FetchLike = async (input, init) => {
+      const method = input.split('/').pop() ?? '';
+      methods.push(method);
+      const params = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      if (method === 'getMe') return json({ ok: true, result: { id: 42, is_bot: true, username: 'TestBot' } });
+      if (method === 'getChat') return json({ ok: true, result: chat });
+      if (method === 'getChatMember' && params.user_id === 42) return json({ ok: true, result: member });
+      return json({ ok: false, error_code: 400, description: 'Bad Request: unexpected call' }, 400);
+    };
+    return { fetchFn, methods };
+  }
+
+  it('администратор супергруппы может писать, и проверка ничего не отправляет', async () => {
+    const { fetchFn, methods } = botApi({ id: -100, type: 'supergroup' }, { status: 'administrator' });
+    const access = await checkChatAccess(fetchFn, 't', '-100', 42);
+    assert.deepEqual(access, { type: 'supergroup', status: 'administrator', canPost: true });
+    assert.deepEqual(methods, ['getChat', 'getChatMember']);
+  });
+  it('участник группы пишет, если участникам это не запрещено', async () => {
+    const open = botApi({ type: 'supergroup', permissions: { can_send_messages: true } }, { status: 'member' });
+    assert.equal((await checkChatAccess(open.fetchFn, 't', '-100', 42)).canPost, true);
+    const closed = botApi({ type: 'supergroup', permissions: { can_send_messages: false } }, { status: 'member' });
+    assert.equal((await checkChatAccess(closed.fetchFn, 't', '-100', 42)).canPost, false);
+  });
+  it('личный чат: статус бота не запрашивается, вердикта нет', async () => {
+    const { fetchFn, methods } = botApi({ id: 74920841, type: 'private' });
+    assert.deepEqual(await checkChatAccess(fetchFn, 't', '74920841', 42), { type: 'private' });
+    assert.deepEqual(methods, ['getChat']);
+  });
+  it('канал: вердикт берётся из прав самого бота', async () => {
+    const poster = botApi({ type: 'channel' }, { status: 'administrator', can_post_messages: true });
+    assert.equal((await checkChatAccess(poster.fetchFn, 't', '-100', 42)).canPost, true);
+    const reader = botApi({ type: 'channel' }, { status: 'administrator', can_post_messages: false });
+    assert.equal((await checkChatAccess(reader.fetchFn, 't', '-100', 42)).canPost, false);
+  });
+  it('чат, которого бот не видит, — ошибка с описанием Telegram', async () => {
+    const fetchFn: FetchLike = async () => json({ ok: false, error_code: 400, description: 'Bad Request: chat not found' }, 400);
+    await assert.rejects(checkChatAccess(fetchFn, 'secret-token', '-100', 42), (e: unknown) => {
+      return e instanceof TelegramError && e.message.includes('chat not found') && !e.message.includes('secret-token');
+    });
+  });
+  it('правила Bot API: канал, ограниченный, вышедший', () => {
+    assert.equal(botCanPost('channel', 'administrator', { can_post_messages: true }, {}), true);
+    assert.equal(botCanPost('channel', 'administrator', { can_post_messages: false }, {}), false);
+    assert.equal(botCanPost('channel', 'member', {}, {}), false);
+    assert.equal(botCanPost('channel', 'creator', {}, {}), true);
+    assert.equal(botCanPost('group', 'administrator', {}, { can_send_messages: false }), true, 'админа запрет участникам не касается');
+    assert.equal(botCanPost('group', 'member', {}, {}), true);
+    assert.equal(botCanPost('group', 'restricted', { is_member: true, can_send_messages: true }, {}), true);
+    assert.equal(botCanPost('group', 'restricted', { is_member: true, can_send_messages: false }, {}), false);
+    assert.equal(botCanPost('group', 'restricted', { is_member: false, can_send_messages: true }, {}), false);
+    assert.equal(
+      botCanPost('supergroup', 'restricted', { is_member: true, can_send_messages: true }, { can_send_messages: false }),
+      false,
+      'запрет всем участникам сильнее',
+    );
+    assert.equal(botCanPost('group', 'left', {}, {}), false);
+    assert.equal(botCanPost('group', 'kicked', {}, {}), false);
+  });
+  it('getBotIdentity: id и имя бота', async () => {
+    assert.deepEqual(await getBotIdentity(botApi({}).fetchFn, 't'), { id: 42, username: 'TestBot' });
+    const broken: FetchLike = async () => json({ ok: true, result: { username: 'TestBot' } });
+    await assert.rejects(getBotIdentity(broken, 't'), TelegramError);
   });
 });

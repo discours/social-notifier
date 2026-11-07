@@ -9,7 +9,7 @@ import { readSecrets, secretValues } from './env.ts';
 import { toSourceError } from './errors.ts';
 import { fetchSourcePosts } from './sources/index.ts';
 import { graphGet } from './sources/meta.ts';
-import { getBotUsername, sendTelegramMessage } from './telegram.ts';
+import { checkChatAccess, getBotIdentity, sendTelegramMessage } from './telegram.ts';
 import { asString, isRecord, makeRedactor } from './util.ts';
 
 const { values } = parseArgs({
@@ -78,13 +78,37 @@ async function main(): Promise<number> {
     failed += 1;
     log('не задан секрет TELEGRAM_BOT_TOKEN');
   } else {
+    const token = secrets.telegramBotToken;
     try {
-      log(`бот: @${await getBotUsername(fetchFn, secrets.telegramBotToken)}`);
-      log(`чат для постов: ${secrets.telegramChatId ? 'задан' : 'НЕ задан'}`);
-      log(`чат для алертов: ${secrets.telegramAlertChatId ? 'задан' : 'не задан, алерты пойдут в чат для постов'}`);
+      const bot = await getBotIdentity(fetchFn, token);
+      log(`бот: @${bot.username}`);
+      // Тип чата и статус бота не раскрывают ни чат, ни людей: лог публичный.
+      const checkChat = async (label: string, chatId: string | undefined, fallback: string): Promise<void> => {
+        if (!chatId) {
+          log(`${label}: ${fallback}`);
+          return;
+        }
+        try {
+          const access = await checkChatAccess(fetchFn, token, chatId, bot.id);
+          if (access.canPost === undefined) {
+            log(`${label}: ${access.type}, бот чат видит; права не проверить — доставку покажет send_test`);
+            return;
+          }
+          const status = access.status ? `, бот — ${access.status}` : '';
+          log(`${label}: ${access.type}${status}, писать ${access.canPost ? 'может' : 'НЕ может'}`);
+          if (!access.canPost) failed += 1;
+        } catch (err) {
+          failed += 1;
+          log(`${label}: ОШИБКА ${err instanceof Error ? err.message : String(err)}`);
+        }
+      };
+      if (!secrets.telegramChatId) failed += 1;
+      await checkChat('чат для постов', secrets.telegramChatId, 'НЕ задан');
+      await checkChat('чат для алертов', secrets.telegramAlertChatId, 'не задан, алерты пойдут в чат для постов');
       if (values['send-test']) {
-        const target = secrets.telegramAlertChatId ?? secrets.telegramChatId;
-        if (!target) throw new Error('не задан ни один чат');
+        // Только в чат алертов: пробное сообщение в группе постов увидели бы все.
+        const target = secrets.telegramAlertChatId;
+        if (!target) throw new Error('send_test: не задан TELEGRAM_ALERT_CHAT_ID, а в чат постов проба не пишет');
         await sendTelegramMessage(fetchFn, secrets.telegramBotToken, target, {
           html: 'Радар постов: проверка связи. Это сообщение отправила проба доступов.',
           disablePreview: true,
