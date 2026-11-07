@@ -1,0 +1,21 @@
+{
+  "name": "social-radar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Уведомления в Telegram о новых постах в VK, Instagram и Facebook",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "radar": "node src/main.ts",
+    "probe": "node src/probe.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3"
+  }
+}

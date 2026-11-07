@@ -1,0 +1,72 @@
+import { SourceError, type FailureKind } from '../errors.ts';
+import { requestJson } from '../http.ts';
+import type { Post, VkSource } from '../types.ts';
+import { asString, isRecord } from '../util.ts';
+import type { SourceContext } from './context.ts';
+
+export const VK_WALL_GET_URL = 'https://api.vk.com/method/wall.get';
+
+export async function fetchVkPosts(source: VkSource, ctx: SourceContext): Promise<Post[]> {
+  const token = ctx.secrets.vkToken;
+  if (!token) throw new SourceError('config', 'не задан секрет VK_TOKEN');
+  // Токен уходит в теле POST-запроса, а не в URL.
+  const form = new URLSearchParams({
+    owner_id: String(source.ownerId),
+    count: String(ctx.config.fetchLimit),
+    filter: 'owner', // только посты самого сообщества, без предложенных и чужих
+    v: ctx.config.vkApiVersion,
+    access_token: token,
+  });
+  const { status, body } = await requestJson(ctx.fetch, VK_WALL_GET_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: form.toString(),
+  });
+  return parseVkWall(source, status, body);
+}
+
+export function parseVkWall(source: VkSource, status: number, body: unknown): Post[] {
+  if (isRecord(body) && isRecord(body.error)) {
+    const code = Number(body.error.error_code);
+    const message = asString(body.error.error_msg) ?? 'без описания';
+    throw new SourceError(classifyVkError(code), `VK API ${code}: ${message}`, String(code));
+  }
+  if (status >= 400) throw new SourceError('http', `VK API ответил HTTP ${status}`);
+  const response = isRecord(body) ? body.response : undefined;
+  const items = isRecord(response) ? response.items : undefined;
+  if (!Array.isArray(items)) throw new SourceError('bad_response', 'в ответе VK нет списка постов');
+
+  const posts: Post[] = [];
+  for (const item of items) {
+    if (!isRecord(item)) continue;
+    const id = asString(item.id);
+    const date = typeof item.date === 'number' ? item.date : undefined;
+    if (!id || date === undefined) continue;
+    posts.push({
+      sourceId: source.id,
+      id,
+      url: `https://vk.com/wall${source.ownerId}_${id}`,
+      publishedAt: date * 1000,
+      text: vkText(item),
+    });
+  }
+  return posts;
+}
+
+/** Текст поста, а у репоста без своего текста — текст исходной записи. */
+function vkText(item: Record<string, unknown>): string {
+  const own = asString(item.text) ?? '';
+  if (own.trim() !== '') return own;
+  const history = Array.isArray(item.copy_history) ? item.copy_history : [];
+  const first: unknown = history[0];
+  return isRecord(first) ? (asString(first.text) ?? '') : '';
+}
+
+// Коды ошибок VK API: https://dev.vk.com/ru/reference/errors
+export function classifyVkError(code: number): FailureKind {
+  if (code === 5) return 'auth';
+  if ([7, 15, 27, 30, 200, 203].includes(code)) return 'permission';
+  if ([6, 9, 29].includes(code)) return 'rate_limit';
+  if (code === 100 || code === 113) return 'config';
+  return 'http';
+}

@@ -1,0 +1,86 @@
+name: radar
+
+# Раз в 10 минут проверяет источники и отправляет новые посты в Telegram.
+# Расписание включается переменной репозитория RADAR_ENABLED=true; ручной
+# запуск работает всегда. Состояние (виденные посты, очередь, счётчики сбоев)
+# хранится в ветке `state`, чтобы не засорять историю main.
+
+on:
+  schedule:
+    - cron: '7-59/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Только показать в логе, что было бы отправлено, и не сохранять состояние'
+        type: boolean
+        default: false
+
+concurrency:
+  group: radar
+  cancel-in-progress: false
+
+permissions:
+  contents: write # запись в ветку state
+  actions: write # продление расписания, см. шаг «Не дать расписанию уснуть»
+
+jobs:
+  radar:
+    if: github.event_name == 'workflow_dispatch' || vars.RADAR_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Подключить ветку состояния
+        run: |
+          if git ls-remote --exit-code --heads origin state >/dev/null; then
+            git fetch --quiet --depth=1 origin state
+            git worktree add --quiet --detach state-store FETCH_HEAD
+          else
+            echo "ветки state ещё нет, первый запуск создаст её"
+            git worktree add --quiet --orphan -b state state-store
+          fi
+
+      - name: Радар
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
+          VK_TOKEN: ${{ secrets.VK_TOKEN }}
+          META_TOKEN: ${{ secrets.META_TOKEN }}
+          RADAR_DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+        run: node src/main.ts --state state-store/state.json
+
+      # always(): красный запуск (алерт) тоже меняет состояние — отметку алерта
+      # и счётчики сбоев, их надо сохранить.
+      - name: Сохранить состояние
+        if: always() && !inputs.dry_run
+        working-directory: state-store
+        run: |
+          if [ ! -f state.json ]; then
+            echo "state.json не создан, сохранять нечего"
+            exit 0
+          fi
+          git add state.json
+          if git diff --cached --quiet; then
+            echo "состояние не изменилось"
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit --quiet -m "state: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push --quiet origin HEAD:refs/heads/state
+
+      # GitHub выключает расписание публичного репозитория после 60 дней без
+      # активности. Повторное включение уже включённого workflow ничего не
+      # меняет, кроме этого счётчика, и не создаёт коммитов.
+      - name: Не дать расписанию уснуть
+        if: always() && github.event_name == 'schedule'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/radar.yml/enable" --silent
