@@ -8,3 +8,9 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      # Типы Node идут за минимальной средой (engines: node >=22.18), а не за
+      # последним выпуском: типы новой версии пропустят API, которого нет в 22.
+      # Мажор поднимается вместе с engines и матрицей CI, руками.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
