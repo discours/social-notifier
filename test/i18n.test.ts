@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
-import { parseConfig } from '../src/config.ts';
+import { DEFAULT_GRAPH_API_VERSION, parseConfig } from '../src/config.ts';
 import type { Secrets } from '../src/env.ts';
 import { ALL_SECRETS, secretValues } from '../src/env.ts';
 import type { FailureKind } from '../src/errors.ts';
@@ -14,7 +14,8 @@ import type { FetchLike } from '../src/http.ts';
 import { en } from '../src/i18n/en.ts';
 import { LANGUAGES, textsFor, type Texts } from '../src/i18n/index.ts';
 import { ru } from '../src/i18n/ru.ts';
-import { MAX_FOUND_CHATS, runProbe, testMessages } from '../src/probe-run.ts';
+import { MAX_FOUND_CHATS, MAX_META_PAGE_REQUESTS, runProbe, testMessages } from '../src/probe-run.ts';
+import { GRAPH_ORIGIN } from '../src/sources/meta.ts';
 import { newSourceState } from '../src/state.ts';
 import { findRecentChats, TelegramError } from '../src/telegram.ts';
 import type { Post, RadarConfig } from '../src/types.ts';
@@ -401,10 +402,17 @@ class FakeBot {
   /** `@имя` канала или супергруппы → числовой ID для getChat. */
   names = new Map<string, number>();
   vkPosts: { id: number; date: number; text: string }[] = [];
+  /** Ответ Graph API пробе; без него запрос к Graph — ошибка теста. */
+  graph: ((url: URL) => unknown) | undefined;
+  graphCalls: { url: URL; authorization: string | null }[] = [];
 
   fetch: FetchLike = async (input, init) => {
     const url = new URL(input);
     if (url.hostname === 'api.vk.com') return json({ response: { count: this.vkPosts.length, items: this.vkPosts } });
+    if (url.hostname === 'graph.facebook.com' && this.graph) {
+      this.graphCalls.push({ url, authorization: new Headers(init?.headers).get('authorization') });
+      return json(this.graph(url));
+    }
     assert.equal(url.hostname, 'api.telegram.org');
     const method = url.pathname.split('/').pop() ?? '';
     const params = JSON.parse(typeof init?.body === 'string' && init.body ? init.body : '{}') as Record<string, unknown>;
@@ -813,6 +821,146 @@ describe('проба', () => {
     assert.equal(await runProbe({ ...deps, secrets: withoutAlerts }), 1);
     assert.deepEqual(bot.sent, []);
     assert.ok(lines.some((line) => line.includes(en.probe.sendTestNeedsAlertChat)), lines.join('\n'));
+  });
+});
+
+// ---------- Проба: страницы, которые видит токен Meta ----------
+
+const META_TOKEN = 'EAAG-test-meta-token-value';
+const META_FIELDS = 'id,name,instagram_business_account{id,username}';
+const metaPage = (i: number) => ({
+  id: String(100_000 + i),
+  name: `Page ${i}`,
+  ...(i === 1 ? { instagram_business_account: { id: '178', username: 'discours' } } : {}),
+});
+const metaPageLine = (t: Texts, i: number) => t.probe.metaPage(`Page ${i}`, String(100_000 + i), i === 1 ? '@discours (178)' : undefined);
+const pages = (count: number) => Array.from({ length: count }, (_, i) => metaPage(i + 1));
+
+/**
+ * Graph API пробы: `me` и `me/accounts` по курсору `after`, `perResponse` страниц
+ * на ответ. В `paging.next` — адрес без `fields`, как его можно было бы получить
+ * у Graph: проба, пошедшая по нему, потеряла бы поля и получила бы токены страниц.
+ */
+function fakeGraph(all: unknown[], perResponse = 25): (url: URL) => unknown {
+  return (url) => {
+    if (url.pathname.endsWith('/me')) return { id: '555' };
+    const start = Number(url.searchParams.get('after')?.slice('cur'.length) ?? '0');
+    const end = start + perResponse;
+    return {
+      data: all.slice(start, end),
+      paging: {
+        cursors: { before: `cur${start}`, after: `cur${end}` },
+        ...(end < all.length ? { next: `${GRAPH_ORIGIN}/${DEFAULT_GRAPH_API_VERSION}/me/accounts?limit=25&after=cur${end}` } : {}),
+      },
+    };
+  };
+}
+
+/** Graph API, который на `me/accounts` отвечает `accounts` как есть. */
+const fixedGraph = (accounts: unknown) => (url: URL) => (url.pathname.endsWith('/me') ? { id: '555' } : accounts);
+
+function metaProbe(t: Texts, graph: (url: URL) => unknown) {
+  const bot = new FakeBot();
+  bot.graph = graph;
+  const config = parseConfig({ ...BASE, language: t.language, sources: ONE_SOURCE });
+  const { lines, deps } = probeDeps(bot, t, config, {});
+  const secrets: Secrets = { ...PROBE_SECRETS, META_TOKEN };
+  return { bot, lines, deps: { ...deps, secrets, redact: makeRedactor(secretValues(secrets), t.redacted) } };
+}
+
+const accountsCalls = (bot: FakeBot) => bot.graphCalls.filter((call) => call.url.pathname.endsWith('/me/accounts'));
+
+describe('проба: страницы, которые видит токен Meta', () => {
+  it('показывает все страницы, а не первые 25: следующая — по курсору, на Graph и с теми же полями', async () => {
+    for (const t of [en, ru]) {
+      const { bot, lines, deps } = metaProbe(t, fakeGraph(pages(30)));
+      assert.equal(await runProbe(deps), 0, lines.join('\n'));
+      for (let i = 1; i <= 30; i += 1) assert.ok(lines.includes(metaPageLine(t, i)), `${t.language}: нет страницы ${i}\n${lines.join('\n')}`);
+      assert.ok(!lines.includes(t.probe.metaNoPages), lines.join('\n'));
+      const calls = accountsCalls(bot);
+      assert.deepEqual(
+        calls.map((call) => call.url.searchParams.get('after')),
+        [null, 'cur25'],
+      );
+      for (const call of calls) {
+        assert.equal(call.url.origin, GRAPH_ORIGIN);
+        assert.equal(call.url.pathname, `/${DEFAULT_GRAPH_API_VERSION}/me/accounts`);
+        // Без fields ответ me/accounts содержит токены страниц.
+        assert.equal(call.url.searchParams.get('fields'), META_FIELDS, call.url.href);
+        assert.ok(!call.url.searchParams.has('access_token'), call.url.href);
+        assert.equal(call.authorization, `Bearer ${META_TOKEN}`);
+      }
+    }
+  });
+
+  it('ответ без списка страниц — bad_response и код 1, а не «страниц не видно»', async () => {
+    for (const t of [en, ru]) {
+      for (const body of [{}, { data: null }, { data: { id: '1' } }, { data: 'pages' }, { error: 'none', paging: {} }]) {
+        const { lines, deps } = metaProbe(t, fixedGraph(body));
+        assert.equal(await runProbe(deps), 1, `${JSON.stringify(body)}\n${lines.join('\n')}`);
+        assert.ok(lines.includes(t.probe.error('Meta', 'bad_response', undefined, t.errors.metaNoPageList)), lines.join('\n'));
+        assert.ok(!lines.includes(t.probe.metaNoPages), lines.join('\n'));
+      }
+      // Пустой список — это ответ «страниц нет», а не сбой: подсказка про доступ и код 0.
+      const empty = metaProbe(t, fixedGraph({ data: [] }));
+      assert.equal(await runProbe(empty.deps), 0, empty.lines.join('\n'));
+      assert.ok(empty.lines.includes(t.probe.metaNoPages), empty.lines.join('\n'));
+    }
+  });
+
+  it('следующая страница без курсора — bad_response и код 1: список не обрывается молча', async () => {
+    const next = `${GRAPH_ORIGIN}/${DEFAULT_GRAPH_API_VERSION}/me/accounts?after=x`;
+    for (const t of [en, ru]) {
+      for (const paging of [{ next }, { next, cursors: {} }, { next, cursors: { after: '' } }, { next, cursors: { after: null } }]) {
+        const { bot, lines, deps } = metaProbe(t, fixedGraph({ data: [metaPage(1)], paging }));
+        assert.equal(await runProbe(deps), 1, `${JSON.stringify(paging)}\n${lines.join('\n')}`);
+        assert.ok(lines.includes(t.probe.error('Meta', 'bad_response', undefined, t.errors.graphNoNextCursor)), lines.join('\n'));
+        // Что успели прочитать, показано.
+        assert.ok(lines.includes(metaPageLine(t, 1)), lines.join('\n'));
+        assert.equal(accountsCalls(bot).length, 1);
+      }
+    }
+    // Курсор без next — последняя страница: Graph отдаёт cursors и на ней.
+    const last = metaProbe(en, fixedGraph({ data: [metaPage(1)], paging: { cursors: { before: 'a', after: 'b' } } }));
+    assert.equal(await runProbe(last.deps), 0, last.lines.join('\n'));
+    assert.equal(accountsCalls(last.bot).length, 1);
+  });
+
+  it('больше MAX_META_PAGE_REQUESTS запросов проба не делает: усечение названо в логе, код 1', async () => {
+    assert.equal(MAX_META_PAGE_REQUESTS, 10);
+    const capacity = 25 * MAX_META_PAGE_REQUESTS;
+    for (const t of [en, ru]) {
+      const over = metaProbe(t, fakeGraph(pages(capacity + 1)));
+      assert.equal(await runProbe(over.deps), 1, over.lines.join('\n'));
+      assert.ok(over.lines.includes(t.probe.metaPagesTruncated(capacity, MAX_META_PAGE_REQUESTS)), over.lines.join('\n'));
+      assert.ok(over.lines.includes(metaPageLine(t, capacity)), over.lines.join('\n'));
+      assert.equal(accountsCalls(over.bot).length, MAX_META_PAGE_REQUESTS);
+      // Ровно на пределе список полный: последняя страница без next, усечения нет.
+      const exact = metaProbe(t, fakeGraph(pages(capacity)));
+      assert.equal(await runProbe(exact.deps), 0, exact.lines.join('\n'));
+      assert.ok(!exact.lines.includes(t.probe.metaPagesTruncated(capacity, MAX_META_PAGE_REQUESTS)), exact.lines.join('\n'));
+      assert.equal(accountsCalls(exact.bot).length, MAX_META_PAGE_REQUESTS);
+    }
+    // Graph возвращает тот же курсор снова и снова: проба останавливается на пределе, а не крутится.
+    const next = `${GRAPH_ORIGIN}/${DEFAULT_GRAPH_API_VERSION}/me/accounts?after=same`;
+    const loop = metaProbe(en, fixedGraph({ data: [metaPage(1)], paging: { cursors: { after: 'same' }, next } }));
+    assert.equal(await runProbe(loop.deps), 1, loop.lines.join('\n'));
+    assert.equal(accountsCalls(loop.bot).length, MAX_META_PAGE_REQUESTS);
+    assert.ok(loop.lines.includes(en.probe.metaPagesTruncated(MAX_META_PAGE_REQUESTS, MAX_META_PAGE_REQUESTS)), loop.lines.join('\n'));
+  });
+
+  it('элемент списка страниц не объект — строка о неразобранных и код 1', async () => {
+    for (const t of [en, ru]) {
+      const mixed = metaProbe(t, fixedGraph({ data: [metaPage(1), 'page', null] }));
+      assert.equal(await runProbe(mixed.deps), 1, mixed.lines.join('\n'));
+      assert.ok(mixed.lines.includes(t.probe.error('Meta', 'bad_response', undefined, t.errors.partlyParsed(2, 3))), mixed.lines.join('\n'));
+      assert.ok(mixed.lines.includes(metaPageLine(t, 1)), mixed.lines.join('\n'));
+      // Ни одного разобранного: это сбой разбора, а не «страниц не видно».
+      const alien = metaProbe(t, fixedGraph({ data: ['page'] }));
+      assert.equal(await runProbe(alien.deps), 1, alien.lines.join('\n'));
+      assert.ok(alien.lines.includes(t.probe.error('Meta', 'bad_response', undefined, t.errors.partlyParsed(1, 1))), alien.lines.join('\n'));
+      assert.ok(!alien.lines.includes(t.probe.metaNoPages), alien.lines.join('\n'));
+    }
   });
 });
 

@@ -71,6 +71,8 @@ export const en: Texts = {
     noPostList: (network) => `${network} response has no list of posts`,
     blueskyNoFeed: 'Bluesky response has no feed',
     instagramNoMedia: 'Instagram response has no list of media',
+    metaNoPageList: 'Graph API response has no list of pages',
+    graphNoNextCursor: 'Graph API response points to a next page but gives no cursor for it',
     instagramNotLinked: 'no Instagram professional account is linked to the page, or the token lacks the instagram_basic permission',
     instagramIdNotNumber: 'Instagram account ID is not a number',
     facebookNoPageToken: (pageId) =>
@@ -162,6 +164,8 @@ export const en: Texts = {
     metaOwner: (id) => `token owner: id ${id}`,
     metaNoPages: 'no pages visible: check that the system user has been given access to the page',
     metaPage: (name, pageId, instagram) => `page “${name}” pageId=${pageId}, Instagram: ${instagram ?? 'not linked'}`,
+    metaPagesTruncated: (shown, requests) =>
+      `the page list is incomplete: the probe stops after ${requests} requests; pages shown above: ${shown}, and the token sees more`,
     telegramSection: '== Telegram ==',
     botTokenMissing: 'the TELEGRAM_BOT_TOKEN secret is not set',
     bot: (username) => `bot: @${username}`,
