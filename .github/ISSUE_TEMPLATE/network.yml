@@ -1,26 +1,26 @@
-name: Новая сеть
-description: Предложить сеть, из которой стоит читать посты
+name: New network
+description: Suggest a network worth reading posts from
 labels: [network]
 body:
   - type: markdown
     attributes:
       value: |
-        Сначала загляните в [список сетей, которых пока нет](https://github.com/discours/social-notifier/blob/main/docs/sources/unsupported.md): там уже описано, что мешает TikTok, Threads и Telegram-каналам.
+        First check the [list of networks that are not supported yet](https://github.com/discours/social-notifier/blob/main/docs/sources/unsupported.md): it already explains what blocks TikTok, Threads, and Telegram channels. You can write in English or Russian.
   - type: input
     id: network
     attributes:
-      label: Сеть
+      label: Network
     validations:
       required: true
   - type: textarea
     id: api
     attributes:
-      label: Официальный API
-      description: Ссылка на документацию метода, который отдаёт посты аккаунта. Нужен ли ключ или вход, сколько стоит.
+      label: Official API
+      description: A link to the documentation of the method that returns an account's posts. Whether it needs a key or a sign-in, and what it costs.
     validations:
       required: true
   - type: textarea
     id: why
     attributes:
-      label: Зачем
-      description: Какой аккаунт хотите читать и кому придут уведомления.
+      label: Why
+      description: Which account you want to read and who will get the notifications.

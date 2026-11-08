@@ -1,34 +1,34 @@
-name: Ошибка
-description: Посты не приходят, приходят дважды или алерт непонятен
+name: Bug
+description: Posts do not arrive, arrive twice, or an alert is unclear
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
-        Не вставляйте сюда токены, ID чатов и содержимое секретов. Логи запусков публичные, поэтому ссылки на них достаточно.
-        Уязвимость — не сюда, а приватно: [SECURITY.md](https://github.com/discours/social-notifier/blob/main/SECURITY.md).
+        Do not paste tokens, chat IDs, or the contents of secrets here. Run logs are public, so a link to the run is enough. You can write in English or Russian.
+        A vulnerability does not go here; report it privately: [SECURITY.md](https://github.com/discours/social-notifier/blob/main/SECURITY.md).
   - type: dropdown
     id: network
     attributes:
-      label: Сеть
-      options: [VK, Instagram, Facebook, Bluesky, YouTube, X, RSS или Atom, Telegram, другое]
+      label: Network
+      options: [VK, Instagram, Facebook, Bluesky, YouTube, X, RSS or Atom, Telegram, other]
     validations:
       required: true
   - type: textarea
     id: what
     attributes:
-      label: Что случилось
-      description: Что ждали и что произошло. Если пришёл алерт — его текст без ссылок на чаты.
+      label: What happened
+      description: What you expected and what happened. If an alert arrived, its text without links to chats. English or Russian is fine.
     validations:
       required: true
   - type: input
     id: run
     attributes:
-      label: Ссылка на запуск
-      description: Actions → radar или probe → нужный запуск.
+      label: Link to the run
+      description: Actions → radar or probe → the run in question.
   - type: textarea
     id: probe
     attributes:
-      label: Вывод пробы
-      description: Строки из лога пробы (Actions → probe) для этой сети.
+      label: Probe output
+      description: Lines from the probe log (Actions → probe) for this network.
       render: text

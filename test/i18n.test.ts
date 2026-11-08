@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import { parseConfig } from '../src/config.ts';
 import type { Secrets } from '../src/env.ts';
-import { secretValues } from '../src/env.ts';
+import { ALL_SECRETS, secretValues } from '../src/env.ts';
 import type { FailureKind } from '../src/errors.ts';
 import { formatDigest, TELEGRAM_TEXT_LIMIT } from '../src/format.ts';
 import { formatFailureAlert, formatRecoveryNotice } from '../src/health.ts';
@@ -647,5 +648,144 @@ describe('проба', () => {
     assert.equal(await runProbe({ ...deps, secrets: withoutAlerts }), 1);
     assert.deepEqual(bot.sent, []);
     assert.ok(lines.some((line) => line.includes(en.probe.sendTestNeedsAlertChat)), lines.join('\n'));
+  });
+});
+
+describe('проводка флагов пробы', () => {
+  it('workflow probe передаёт send_test и find_chats в CLI', () => {
+    const workflow = readFileSync(join('.github', 'workflows', 'probe.yml'), 'utf8');
+    for (const [input, env, flag] of [
+      ['send_test', 'SEND_TEST', '--send-test'],
+      ['find_chats', 'FIND_CHATS', '--find-chats'],
+    ] as const) {
+      assert.match(workflow, new RegExp(`\\n      ${input}:\\n        description: '[^']+'\\n        type: boolean\\n        default: false\\n`), input);
+      assert.ok(workflow.includes(`          ${env}: \${{ inputs.${input} }}\n`), env);
+      assert.ok(workflow.includes(`          if [ "$${env}" = "true" ]; then args+=(${flag}); fi\n`), flag);
+    }
+  });
+
+  it('CLI с --find-chats ищет чаты даже без конфига, без флага — нет', () => {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    for (const name of ALL_SECRETS) delete env[name];
+    const run = (args: string[]) =>
+      spawnSync(process.execPath, ['src/probe.ts', '--config', 'no-such-config.json', ...args], { env, encoding: 'utf8', timeout: 30_000 });
+    const withFlag = run(['--find-chats']);
+    assert.equal(withFlag.status, 1, withFlag.stderr);
+    assert.ok(withFlag.stdout.includes(en.probe.crashed('cannot read no-such-config.json')), withFlag.stdout);
+    assert.ok(withFlag.stdout.includes(en.probe.botTokenMissing), withFlag.stdout);
+    const withoutFlag = run([]);
+    assert.equal(withoutFlag.status, 1, withoutFlag.stderr);
+    assert.ok(!withoutFlag.stdout.includes(en.probe.botTokenMissing), withoutFlag.stdout);
+  });
+});
+
+// ---------- Документация на двух языках ----------
+
+const ROOT_DOCS = ['README', 'SECURITY', 'CONTRIBUTING'];
+
+/** Пары документации: английский `x.md` и русский `x.ru.md`. */
+function docPairs(): { en: string; ru: string }[] {
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return walk(path);
+      return entry.name.endsWith('.md') ? [path] : [];
+    });
+  const english = [...walk('docs'), ...ROOT_DOCS.map((name) => `${name}.md`)].filter((path) => !path.endsWith('.ru.md'));
+  return english.map((path) => ({ en: path, ru: path.replace(/\.md$/, '.ru.md') }));
+}
+
+/** Якорь заголовка, как его строит GitHub. */
+function slug(heading: string): string {
+  return heading
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .replace(/\s/g, '-');
+}
+
+function anchorsOf(path: string): Set<string> {
+  const anchors = new Set<string>();
+  let inCode = false;
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    if (line.trimStart().startsWith('```')) inCode = !inCode;
+    const heading = !inCode && /^#{1,6} (.+)$/.exec(line);
+    if (heading) anchors.add(slug(heading[1] ?? ''));
+  }
+  return anchors;
+}
+
+/**
+ * Относительные ссылки Markdown вне блоков кода: [текст](путь#якорь). Строка
+ * переключателя языка (третья) не в счёт: её проверяет отдельный тест.
+ */
+function linksOf(path: string): { target: string; anchor: string | undefined }[] {
+  const text = readFileSync(path, 'utf8')
+    .split('\n')
+    .filter((_, i) => i !== 2)
+    .join('\n')
+    .replace(/```[\s\S]*?```/g, '');
+  return [...text.matchAll(/\]\(([^)\s]+)\)/g)]
+    .map((match) => match[1] ?? '')
+    .filter((href) => !/^[a-z]+:/.test(href))
+    .map((href) => {
+      const [file = '', anchor] = href.split('#');
+      return { target: file === '' ? path : join(dirname(path), file), anchor };
+    });
+}
+
+describe('документация на двух языках', () => {
+  const pairs = docPairs();
+
+  it('у каждой страницы есть пара на другом языке с переключателем под заголовком', () => {
+    assert.ok(pairs.length >= 12, `пар: ${pairs.length}`);
+    for (const { en: enPath, ru: ruPath } of pairs) {
+      assert.ok(existsSync(ruPath), `${ruPath}: нет русской пары`);
+      const enLines = readFileSync(enPath, 'utf8').split('\n');
+      const ruLines = readFileSync(ruPath, 'utf8').split('\n');
+      const name = basename(enPath);
+      assert.equal(enLines[2], `**English** · [Русский](${basename(ruPath)})`, enPath);
+      assert.equal(ruLines[2], `[English](${name}) · **Русский**`, ruPath);
+    }
+  });
+
+  it('английские страницы без кириллицы, кроме переключателя', () => {
+    for (const { en: enPath } of pairs) {
+      const lines = readFileSync(enPath, 'utf8').split('\n');
+      const offenders = lines.filter((line, i) => i !== 2 && CYRILLIC.test(line));
+      assert.deepEqual(offenders, [], enPath);
+    }
+  });
+
+  it('ссылки ведут на существующие файлы и заголовки, русские страницы — на русские пары', () => {
+    let checked = 0;
+    for (const { en: enPath, ru: ruPath } of pairs) {
+      for (const path of [enPath, ruPath]) {
+        for (const { target, anchor } of linksOf(path)) {
+          assert.ok(existsSync(target), `${path}: нет файла ${target}`);
+          if (anchor !== undefined) assert.ok(anchorsOf(target).has(anchor), `${path}: нет заголовка #${anchor} в ${target}`);
+          if (target.endsWith('.md') && target !== path) {
+            const isRu = target.endsWith('.ru.md');
+            const twin = isRu ? target : target.replace(/\.md$/, '.ru.md');
+            if (path === ruPath && existsSync(twin)) assert.ok(isRu, `${path}: ссылка на английскую ${target}`);
+            if (path === enPath && isRu) assert.equal(target, ruPath, `${path}: ссылка на русскую ${target}`);
+          }
+          checked += 1;
+        }
+      }
+    }
+    assert.ok(checked >= 60, `ссылок проверено: ${checked}`);
+  });
+
+  it('примеры конфига в README и инструкции проходят проверку конфига', () => {
+    let blocks = 0;
+    for (const path of ['README.md', 'README.ru.md', join('docs', 'setup.md'), join('docs', 'setup.ru.md')]) {
+      for (const [, block] of readFileSync(path, 'utf8').matchAll(/```json\n([\s\S]*?)```/g)) {
+        const raw: unknown = JSON.parse((block ?? '').replace(/^ {3}/gm, ''));
+        assert.doesNotThrow(() => parseConfig(raw), path);
+        blocks += 1;
+      }
+    }
+    assert.equal(blocks, 4);
   });
 });

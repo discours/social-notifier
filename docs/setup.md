@@ -1,160 +1,176 @@
-# Настройка
+# Setup
 
-Порядок: своя копия репозитория → бот Telegram → источники → проба → первый запуск → расписание. Каждый токен вписывается только в секреты репозитория: не в код, не в issue, не в чат.
+**English** · [Русский](setup.ru.md)
 
-Команды ниже используют [GitHub CLI](https://cli.github.com/); `OWNER/REPO` — ваш репозиторий. `gh secret set` спрашивает значение сам и не показывает его на экране.
+Order: your own copy of the repository → Telegram bot → sources → probe → first run → schedule. Every token goes only into repository secrets: not into code, not into an issue, not into a chat.
 
-## 0. Своя копия
+The commands below use the [GitHub CLI](https://cli.github.com/); `OWNER/REPO` is your repository. `gh secret set` asks for the value itself and does not show it on screen.
 
-- **Форк** — если хотите получать обновления кнопкой **Sync fork**. Оставьте отмеченным **Copy the main branch only**. В форке GitHub не запускает workflow, пока вы не включите их на вкладке **Actions**, — сделайте это до пробы.
-- **Шаблон** (**Use this template**) — если нужна независимая копия без связи с оригиналом. Не отмечайте **Include all branches**. Обновления переносятся вручную.
+## 0. Your own copy
 
-Копировать нужно только `main`. В ветке `state` оригинала лежат очередь и виденные посты «Дискурса»: с ней первый запуск может прислать в вашу группу посты «Дискурса» и архив ваших источников. Если ветка `state` всё же скопировалась, удалите её до первого запуска:
+- **Fork** — if you want to receive updates with the **Sync fork** button. Leave **Copy the main branch only** checked. GitHub does not run workflows in a fork until you enable them on the **Actions** tab — do it before the probe.
+- **Template** (**Use this template**) — if you want an independent copy with no link to the original. Do not check **Include all branches**. Updates are carried over by hand.
+
+Copy only `main`. The original's `state` branch holds the queue and the seen posts of Discours: with it, the first run could send Discours posts and an archive of your own sources to your group. If the `state` branch was copied anyway, delete it before the first run:
 
 ```bash
 gh api --method DELETE repos/OWNER/REPO/git/refs/heads/state
 ```
 
-Копию делайте публичной: для публичного репозитория минуты GitHub Actions бесплатны. В приватном каждый запуск округляется до минуты, и при опросе раз в 10 минут выходит около 4 400 минут в месяц — больше бесплатного лимита тарифа GitHub Free.
+Keep the copy public: GitHub Actions minutes are free for public repositories. In a private one every run is rounded up to a minute, and polling every 10 minutes adds up to about 4,400 minutes a month — more than the free allowance of the GitHub Free plan.
 
-В публичном репозитории видны логи запусков и ветка `state`. Секретов там нет: в логе только счётчики, ID и даты, в состоянии — ID постов, тексты постов, ждущих отправки, время и тексты ошибок, очищенные от токенов.
+In a public repository the run logs and the `state` branch are visible. They hold no secrets: the log has only counters, IDs and dates; the state has post IDs, texts of posts waiting to be sent, timestamps and error texts scrubbed of tokens.
 
-**Свой конфиг.** В корне лежит рабочий `radar.config.json` «Дискурса», и примеры на страницах сетей — тоже его аккаунты. В форке скопируйте этот файл, например в `config/newsroom.json`, впишите свой `messageTitle` и свои источники, а путь укажите в переменной репозитория:
+**Your own config.** The root holds the working `radar.config.json` of Discours, and the examples on the network pages are its accounts too. In a fork, copy this file, for example to `config/newsroom.json`, put in your own `messageTitle` and sources, and set the path in a repository variable:
 
 ```bash
 gh variable set RADAR_CONFIG --body config/newsroom.json --repo OWNER/REPO
 ```
 
-Тогда **Sync fork** не будет конфликтовать с конфигом оригинала. Правку файлов workflow, например расписания в `radar.yml`, **Sync fork** попросит слить вручную. В копии из шаблона можно просто править `radar.config.json`.
+Then **Sync fork** will not conflict with the original's config. Changes to workflow files, such as the schedule in `radar.yml`, **Sync fork** will ask you to merge by hand. In a copy from the template you can simply edit `radar.config.json`.
 
-## 1. Бот Telegram
+The `language` field sets the language of messages, alerts and logs: `"en"` or no field for English, `"ru"` for Russian.
 
-1. В [@BotFather](https://t.me/BotFather): `/newbot` для нового бота или `/mybots` → бот → **API Token** для существующего. Не нажимайте **Revoke**: старый токен перестанет работать везде, где он уже используется.
-2. Сохраните токен:
+## 1. Telegram bot
+
+1. In [@BotFather](https://t.me/BotFather): `/newbot` for a new bot, or `/mybots` → the bot → **API Token** for an existing one. Do not press **Revoke**: the old token would stop working everywhere it is already used.
+2. Save the token:
 
    ```bash
    gh secret set TELEGRAM_BOT_TOKEN --repo OWNER/REPO
    ```
 
-3. **Чат для постов.** Добавьте бота в группу или канал; в канале боту нужно право публиковать сообщения. ID группы — отрицательное число, у супергруппы и канала оно начинается с `-100`. Чтобы узнать его, отправьте в группу команду `/start@имя_бота`: обычные сообщения в группе бот по умолчанию не видит. В канале опубликуйте любой пост. Затем запросите последние обновления бота — команда спросит токен, не показывая его, и передаст curl через stdin, а не в аргументах:
+3. **Posts chat.** Add the bot to a group or a channel; in a channel the bot needs the right to post messages.
+4. **Alerts chat** — usually the private chat of the person in charge. Send `/start` to the bot: without it the bot cannot write first.
+5. **Chat IDs.** Run the chat search:
 
    ```bash
-   printf 'Токен бота: '; read -rs T; echo; printf 'url = "https://api.telegram.org/bot%s/getUpdates"\n' "$T" | curl -s -K -; unset T
+   gh workflow run probe.yml -f find_chats=true --repo OWNER/REPO
    ```
 
-   ID — в `chat.id` внутри `message` (группа) или `channel_post` (канал). Обновления Telegram хранит сутки. Если бот уже подключён к другому сервису через webhook, `getUpdates` ответит ошибкой 409; тогда возьмите ID группы из настроек того сервиса.
+   The bot replies in every chat where it recently appeared — group, channel and private chat — with a message holding that chat's ID. IDs never reach the public log: it shows only the number and type of each chat. A group ID is a negative number; for a supergroup or a channel it starts with `-100`.
+
+   Telegram keeps a bot's updates for 24 hours. If the bot was added earlier, send the command `/start@your_bot_name` to the group (by default the bot does not see ordinary group messages), publish any post in the channel, and run the search again. If another service already receives the bot's updates — through a webhook or its own polling — the search says so; then take the ID from that service's settings.
+
+   Save both IDs:
 
    ```bash
    gh secret set TELEGRAM_CHAT_ID --repo OWNER/REPO
    ```
 
-4. **Чат для алертов** — обычно личка ответственного. Напишите боту `/start` (без этого бот не может писать первым) и узнайте свой ID у [@userinfobot](https://t.me/userinfobot).
-
    ```bash
    gh secret set TELEGRAM_ALERT_CHAT_ID --repo OWNER/REPO
    ```
 
-   Без этого секрета алерты придут в чат для постов.
+   Without `TELEGRAM_ALERT_CHAT_ID` alerts go to the posts chat.
 
-## 2. Источники
+## 2. Sources
 
-Замените источники в конфиге своими: ID в примерах — аккаунты «Дискурса». Как получить доступ и что вписать в конфиг — на странице сети:
+Replace the sources in the config with your own: the IDs in the examples are Discours accounts. How to get access and what to put into the config is on each network's page:
 
-| Сеть | Страница | Секрет |
+| Network | Page | Secret |
 | --- | --- | --- |
 | VK | [vk.md](sources/vk.md) | `VK_TOKEN` |
 | Instagram, Facebook | [meta.md](sources/meta.md) | `META_TOKEN` |
-| Bluesky | [bluesky.md](sources/bluesky.md) | не нужен |
+| Bluesky | [bluesky.md](sources/bluesky.md) | not needed |
 | YouTube | [youtube.md](sources/youtube.md) | `YOUTUBE_API_KEY` |
 | X | [x.md](sources/x.md) | `X_BEARER_TOKEN` |
-| RSS и Atom | [feed.md](sources/feed.md) | не нужен |
+| RSS and Atom | [feed.md](sources/feed.md) | not needed |
 
-Остальные поля конфига описаны в [README](../README.md#настройки).
+The other config fields are described in the [README](../README.md#configuration).
 
-## 3. Проба доступов
+## 3. Access probe
 
-Проба читает каждый источник так же, как радар (X — только 5 последних постов: каждый прочитанный платный), показывает страницы и Instagram-аккаунты, которые видит токен Meta, и проверяет бота. Состояние она не трогает.
+The probe reads every source the same way the radar does (X only the latest 5 posts: each post read is paid for), shows the pages and Instagram accounts the Meta token can see, and checks the bot. It does not touch the state.
 
 ```bash
 gh workflow run probe.yml --repo OWNER/REPO
 ```
 
-Если задан чат для алертов, добавьте `-f send_test=true`: бот пришлёт туда тестовое сообщение. Без `TELEGRAM_ALERT_CHAT_ID` проба с этим флагом закончится ошибкой.
+If the alerts chat is set, add `-f send_test=true`: the bot sends a test message there with a sample notification — the latest post of each source, exactly as posts will appear in the posts chat. Without `TELEGRAM_ALERT_CHAT_ID` the probe with this flag ends with an error.
 
-Результат — в логе запуска (Actions → probe). У каждого источника там `OK` и дата последнего поста или `ОШИБКА` с причиной.
+The result is in the run log (Actions → probe). Each source shows `OK` and the date of its latest post, or `ERROR` with the reason.
 
-Чат для постов проба проверяет, ничего туда не отправляя: пробное сообщение увидела бы вся группа. В логе — тип чата, статус бота и вывод, например `чат для постов: supergroup, бот — administrator, писать может`. Если там `НЕ может` или `chat not found`, бота нет в группе, у него отняли право писать или ID чата неверный.
+The probe checks the posts chat without sending anything there: the whole group would see a test message. The log shows the chat type, the bot's status and the verdict, for example `posts chat: supergroup, bot is administrator, can post`. If it says `CANNOT post` or `chat not found`, the bot is not in the group, lost the right to post, or the chat ID is wrong.
 
-У личного чата права не проверить: Telegram не говорит, не заблокирован ли бот, и проба пишет `права не проверить`. Доставку туда доказывает `send_test=true`. Тестовое сообщение уходит только в чат алертов; если `TELEGRAM_ALERT_CHAT_ID` не задан, проба отказывается его отправлять, а не пишет в группу.
+A private chat's rights cannot be checked: Telegram does not say whether the bot is blocked, and the probe writes `its rights can't be checked`. Delivery there is proven by `send_test=true`. The test message goes only to the alerts chat; if `TELEGRAM_ALERT_CHAT_ID` is not set, the probe refuses to send it rather than write to the group.
 
-## 4. Первый запуск и расписание
+## 4. First run and schedule
 
-Первый запуск запоминает текущие посты и ничего не присылает:
+The first run remembers the current posts and sends nothing:
 
 ```bash
 gh workflow run radar.yml --repo OWNER/REPO
 ```
 
-После него в репозитории появится ветка `state`. Включите расписание:
+After it the repository has a `state` branch. Turn on the schedule:
 
 ```bash
 gh variable set RADAR_ENABLED --body true --repo OWNER/REPO
 ```
 
-Выключить — `gh variable delete RADAR_ENABLED --repo OWNER/REPO`.
+To turn it off: `gh variable delete RADAR_ENABLED --repo OWNER/REPO`.
 
-Новый источник можно добавить в конфиг и позже: его первый опрос тоже только запомнит текущие посты.
+You can add a new source to the config later as well: its first poll also only remembers the current posts.
 
-## Если пришёл алерт
+## If you get an alert
 
-Алерт называет сеть, давность сбоя, что сделать и причину. Частые причины:
+The alert names the network, how long it has been failing, what to do and the reason. Common reasons:
 
-| Причина | Что значит | Что делать |
+| Reason | What it means | What to do |
 | --- | --- | --- |
-| `auth` | токен отозван или истёк | выпустить новый токен и обновить секрет из алерта |
-| `permission` | у токена нет нужного разрешения или доступа к аккаунту | проверить доступы и разрешения на странице сети |
-| `billing` | сеть отказала из-за оплаты | пополнить счёт или проверить тариф в кабинете разработчика |
-| `rate_limit` | сеть попросила обращаться реже или кончилась суточная квота | обычно проходит само |
-| `network` | сеть не ответила | обычно проходит само |
-| `http` | сеть ответила ошибкой без понятного кода | если повторяется сутки — открыть лог запуска |
-| `bad_response` | ответ не разобрался целиком: незнакомый формат, запись ленты без даты или ссылки, ответ больше 32 МБ | открыть лог запуска; если сеть поменяла формат ответа, коду нужна правка |
-| `config` | неверный ID в конфиге или не задан секрет | сверить с выводом пробы |
+| `auth` | the token was revoked or expired | issue a new token and update the secret named in the alert |
+| `permission` | the token lacks a permission or access to the account | check access and permissions on the network's page |
+| `billing` | the network refused because of payment | top up the balance or check the plan in the developer console |
+| `rate_limit` | the network asked to slow down, or the daily quota ran out | usually passes on its own |
+| `network` | the network did not respond | usually passes on its own |
+| `http` | the network returned an error without a clear code | if it repeats for a day, open the run log |
+| `bad_response` | the response could not be fully parsed: an unknown format, a feed entry without a date or link, a response larger than 32 MB | open the run log; if the network changed its response format, the code needs a fix |
+| `config` | a wrong ID in the config or a missing secret | compare with the probe output |
 
-Когда сеть снова ответит, придёт сообщение «посты снова читаются», а посты, вышедшие за время сбоя, придут обычным сообщением, если им меньше `maxPostAgeHours` и они среди последних `fetchLimit` постов источника. После обновления секрета запустите пробу: она сразу покажет, помогло ли.
+When the network answers again, a “posts are being read again” message arrives, and posts published during the outage come in a regular message if they are younger than `maxPostAgeHours` and among the source's latest `fetchLimit` posts. After updating a secret, run the probe: it shows right away whether that helped.
 
-## Если посты перестали приходить
+## If posts stopped arriving
 
-Если запуски раз в сутки краснеют, посты не приходят, а в логе шага «Радар» есть строки `не доставлено сообщение с постами: ...` и `Telegram: ...`, посмотрите на код ответа во второй.
+If runs turn red once a day, posts do not arrive, and the log of the `Radar` step has the lines `message with posts not delivered: ...` and `Telegram: ...`, look at the response code in the second one.
 
-- **Сломан чат или бот:** `HTTP 401`, `403`, сетевая ошибка, а также `HTTP 400` с описанием про чат или права — `chat not found`, `group chat was upgraded to a supergroup chat`, `need administrator rights`, `not enough rights`. Чините секрет или права бота, очередь не трогайте: она дождётся починки. Если группа стала супергруппой, у неё новый ID (обычно начинается с `-100`) — обновите `TELEGRAM_CHAT_ID` и проверьте пробой.
-- **Сломано само сообщение:** `HTTP 400` с описанием про текст — `message is too long`, `can't parse entities`, `text must be non-empty`, — и каждый запуск называет одни и те же посты, например `vk:123, facebook:456_789`. Telegram не примет это сообщение никогда, а всё, что стоит в очереди после него, тоже ждёт. Снимите эти посты с очереди вручную. Они уже опубликованы в соцсетях: потеряется только уведомление о них.
+- **The chat or the bot is broken:** `HTTP 401`, `403`, a network error, or `HTTP 400` with a description about the chat or rights — `chat not found`, `group chat was upgraded to a supergroup chat`, `need administrator rights`, `not enough rights`. Fix the secret or the bot's rights and leave the queue alone: it waits for the fix. If the group became a supergroup, it has a new ID (usually starting with `-100`) — update `TELEGRAM_CHAT_ID` and check with the probe.
+- **The message itself is broken:** `HTTP 400` with a description about the text — `message is too long`, `can't parse entities`, `text must be non-empty` — and every run names the same posts, for example `vk:123, facebook:456_789`. Telegram will never accept this message, and everything queued after it waits too. Remove these posts from the queue by hand. They are already published on the networks: only the notification about them is lost.
 
-Снять посты с очереди:
+To remove posts from the queue:
 
-1. Выключите расписание, чтобы запуск не перезаписал правку:
+1. Turn off the schedule so that a run does not overwrite your edit:
 
    ```bash
    gh variable delete RADAR_ENABLED --repo OWNER/REPO
    ```
 
-2. Дождитесь, пока закончится текущий запуск, если он идёт. Склонируйте ветку состояния:
+2. Wait for the current run to finish, if one is going. Clone the state branch:
 
    ```bash
    git clone --branch state --single-branch https://github.com/OWNER/REPO.git radar-state
    ```
 
-3. В `radar-state/state.json` удалите из массива `pending` записи с этими `sourceId` и `id`. Остальное не трогайте: ID в `sources.*.seen` не дадут радару прислать эти посты снова.
+3. In `radar-state/state.json`, delete the entries with these `sourceId` and `id` from the `pending` array. Leave everything else: the IDs in `sources.*.seen` keep the radar from sending these posts again.
 
-4. Сохраните и включите расписание обратно:
+4. Save and turn the schedule back on:
 
    ```bash
-   git -C radar-state commit -am "state: снять недоставляемые посты" && git -C radar-state push
+   git -C radar-state commit -am "state: drop undeliverable posts" && git -C radar-state push
    ```
 
    ```bash
    gh variable set RADAR_ENABLED --body true --repo OWNER/REPO
    ```
 
-Если `state.json` после правки не разбирается, радар остановится с ошибкой «файл состояния повреждён» и ничего не отправит. Это не потеря данных: исправьте файл и запустите снова.
+If `state.json` no longer parses after the edit, the radar stops with the error `state file is corrupted` and sends nothing. No data is lost: fix the file and run again.
 
-Если сломалось что-то, чего здесь нет, откройте issue по шаблону «Ошибка».
+If something broke that is not covered here, open an issue with the Bug template.
+
+## Good to know
+
+- If more than `fetchLimit` posts were published on one network between two successful polls, the radar does not see the extra ones. With polling every 10 minutes this happens only after a long outage.
+- The earliest post of a message arrives no sooner than `groupWindowMinutes` after publication, usually within the next 10 minutes: the first run after the window closes sends it, and GitHub may delay that run too. A shorter window delivers posts faster, but a crosspost to neighbouring networks more often splits into two messages.
+- Delivery is “at least once”: a post can arrive twice but is never lost. A duplicate happens if the state was not saved (a GitHub failure, a run killed by timeout) or if Telegram accepted the message but its reply never reached the radar.
+- The GitHub Actions schedule is not exact: a run can be several minutes late, more at peak hours.
+- GitHub disables the schedule of a public repository after 60 days without activity. The radar commits to the `state` branch and re-enables its workflow through the API, but whether GitHub counts that as activity is not documented. If the schedule does get disabled, the Actions page shows a warning, and the **Enable workflow** button turns it back on.

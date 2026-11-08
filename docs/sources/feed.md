@@ -1,10 +1,12 @@
-# RSS и Atom
+# RSS and Atom
 
-Любая лента RSS 2.0 или Atom 1.0 по открытому адресу: Mastodon, Substack, блоги, подкасты, релизы на GitHub.
+**English** · [Русский](feed.ru.md)
 
-**Что нужно:** адрес ленты, только `https`. **Цена:** бесплатно.
+Any RSS 2.0 or Atom 1.0 feed at a public address: Mastodon, Substack, blogs, podcasts, GitHub releases.
 
-## Источник в конфиге
+**What you need:** the feed URL, `https` only. **Cost:** free.
+
+## Source in the config
 
 ```json
 [
@@ -13,24 +15,24 @@
 ]
 ```
 
-Адрес лежит в публичном конфиге, поэтому логин и пароль в нём запрещены. Закрытые ленты не поддерживаются. Если лента перенаправляет на адрес без `https` или весит больше 32 МБ, радар её не читает и присылает алерт.
+The URL lives in the public config, so a username and password in it are forbidden. Private feeds are not supported. If a feed redirects to a non-`https` address or is larger than 32 MB, the radar does not read it and sends an alert.
 
-## Где взять адрес
+## Where to find the URL
 
-| Площадка | Адрес ленты |
+| Platform | Feed URL |
 | --- | --- |
-| Mastodon | `https://<сервер>/@<имя>.rss` |
-| Substack | `https://<имя>.substack.com/feed` |
-| WordPress | `https://<сайт>/feed/` |
-| YouTube | `https://www.youtube.com/feeds/videos.xml?channel_id=UC…` (ненадёжно, см. [YouTube](youtube.md)) |
-| GitHub, релизы | `https://github.com/<владелец>/<репозиторий>/releases.atom` |
+| Mastodon | `https://<server>/@<name>.rss` |
+| Substack | `https://<name>.substack.com/feed` |
+| WordPress | `https://<site>/feed/` |
+| YouTube | `https://www.youtube.com/feeds/videos.xml?channel_id=UC…` (unreliable, see [YouTube](youtube.md)) |
+| GitHub, releases | `https://github.com/<owner>/<repository>/releases.atom` |
 
-## Что приходит
+## What arrives
 
-- Текст сообщения — заголовок записи. У лент без заголовков (Mastodon) — первая строка описания без HTML.
-- Ссылка — `<link>` записи, иначе `<guid>` с адресом, а у подкастов без того и другого — файл выпуска из `<enclosure>`. Время — `pubDate` у RSS, `published` (иначе `updated`) у Atom.
-- Из длинной ленты берутся `fetchLimit` самых свежих записей.
-- Запись без даты или без ссылки не разбирается и считается сбоем ленты: со второго такого запуска приходит алерт. Сбоем не считается запись, из-за которой ничего не теряется: вышедшая раньше `maxPostAgeHours` или до подключения ленты, не попавшая бы в `fetchLimit` свежих, а без даты — стоящая дальше `fetchLimit` записей от свежего края ленты. Обычно свежий край — начало ленты, у лент от старых к новым — конец.
-- Ссылка длиннее 2048 символов не принимается: сообщение с ней Telegram мог бы не взять, и оно задержало бы очередь всех сетей. Тогда берётся запасная ссылка из `<guid>` или `<enclosure>`, а если её нет, запись считается неразобранной.
-- Закомментированные записи (`<!-- … -->`) не приходят. Незакрытый `<!--` или `<![CDATA[` — просто текст: записи после него разбираются как обычно. Текст в `<![CDATA[…]]>` — просто текст: `</item>` в нём запись не закрывает. В записи Atom вложенный `<source>` — описание ленты-первоисточника — не путается с самой записью.
-- Кодировку задаёт метка порядка байтов (BOM), если она есть; иначе — объявление `<?xml … encoding="…"?>`, затем заголовок `Content-Type`, иначе — UTF-8. Объявление UTF-16 без BOM пропускается: раз оно прочиталось побайтово, документ не в UTF-16. Ленты в windows-1251 и других однобайтовых кодировках читаются.
+- The message text is the entry title. For feeds without titles (Mastodon), it is the first line of the description without HTML.
+- The link is the entry's `<link>`; otherwise a `<guid>` that holds an address; for podcasts with neither, the episode file from `<enclosure>`. The time is `pubDate` in RSS and `published` (otherwise `updated`) in Atom.
+- From a long feed, the `fetchLimit` newest entries are taken.
+- An entry without a date or without a link cannot be parsed and counts as a feed failure: from the second such run, an alert arrives. An entry whose loss costs nothing does not count as a failure: one published earlier than `maxPostAgeHours` or before the feed was connected, one that would not fall into the `fetchLimit` newest, or, for an entry without a date, one that sits more than `fetchLimit` entries away from the fresh end of the feed. The fresh end is usually the start of the feed; for feeds ordered from old to new, it is the end.
+- A link longer than 2048 characters is not accepted: Telegram might reject the message with it, and it would hold up the queue of all networks. In that case a fallback link from `<guid>` or `<enclosure>` is used, and if there is none, the entry counts as unparsed.
+- Commented-out entries (`<!-- … -->`) do not arrive. An unclosed `<!--` or `<![CDATA[` is plain text: entries after it are parsed as usual. Text inside `<![CDATA[…]]>` is plain text: a `</item>` in it does not close the entry. In an Atom entry, a nested `<source>` (the description of the original feed) is not confused with the entry itself.
+- The encoding is set by the byte order mark (BOM) if there is one; otherwise by the `<?xml … encoding="…"?>` declaration, then the `Content-Type` header, otherwise UTF-8. A UTF-16 declaration without a BOM is ignored: if it could be read byte by byte, the document is not UTF-16. Feeds in windows-1251 and other single-byte encodings are read.

@@ -1,26 +1,28 @@
-# Участие
+# Contributing
 
-Спасибо, что хотите помочь. Ошибки и пожелания — в issue по шаблону, правки — pull request в `main`.
+**English** · [Русский](CONTRIBUTING.ru.md)
 
-## Перед pull request
+Thank you for wanting to help. Bugs and requests go in an issue using a template; changes go in a pull request to `main`.
+
+## Before a pull request
 
 ```bash
 npm ci
 npm run typecheck && npm test
 ```
 
-Зелёный — нулевой код возврата обеих команд. CI гоняет то же на Node 22 и 24.
+Green means both commands return exit code 0. CI runs the same on Node 22 and 24.
 
-## Что важно знать
+## What to know
 
-- Node 22.18+, TypeScript исполняется напрямую. Только стираемый синтаксис: без `enum`, `namespace` и parameter properties; импорты — с расширением `.ts`.
-- Зависимостей во время работы нет. Новая требует обоснования в описании pull request.
-- Логи публичные. В лог, алерт и состояние не попадают секреты, адреса запросов, заголовки и тела ответов API целиком.
-- Новая логика отбора или отправки получает тест, который краснеет при её поломке. Внешние API в тестах подменяются, в сеть тесты не ходят.
-- Тексты для людей — по-русски, код и идентификаторы — по-английски.
+- Node 22.18+, TypeScript runs directly. Erasable syntax only: no `enum`, `namespace`, or parameter properties; imports use the `.ts` extension.
+- There are no runtime dependencies. A new one needs a justification in the pull request description.
+- Logs are public. Secrets, request URLs, headers, and whole API response bodies must not reach the log, an alert, or the state.
+- New selection or sending logic gets a test that fails when the logic breaks. External APIs are mocked in tests; the tests do not go to the network.
+- Texts for people live in the catalog `src/i18n/` (English and Russian); code and identifiers are in English. Issues and pull requests can be written in English or Russian.
 
-Новая сеть — по шагам из [docs/adding-a-source.md](docs/adding-a-source.md). Подробные правила для правок кода — в [AGENTS.md](AGENTS.md).
+A new network follows the steps in [docs/adding-a-source.md](docs/adding-a-source.md). Detailed rules for code changes are in [AGENTS.md](AGENTS.md).
 
-## Безопасность
+## Security
 
-Уязвимость не описывайте в открытом issue — порядок в [SECURITY.md](SECURITY.md).
+Do not describe a vulnerability in a public issue — the procedure is in [SECURITY.md](SECURITY.md).
