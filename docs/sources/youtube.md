@@ -27,6 +27,8 @@ gcloud services api-keys list --project PROJECT --format="value(displayName,name
 gcloud services api-keys get-key-string KEY_ID --project PROJECT --format="value(keyString)" | gh secret set YOUTUBE_API_KEY --repo OWNER/REPO
 ```
 
+`KEY_ID` — вторая колонка вывода `list`. С `--async` gcloud не ждёт создания ключа: если нового ключа в списке ещё нет, повторите `list` через несколько секунд.
+
 `KEY_ID` — вторая колонка вывода `list` у ключа `social-notifier YouTube`.
 
 Радар передаёт ключ в заголовке `x-goog-api-key`, не в адресе запроса.

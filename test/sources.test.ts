@@ -583,14 +583,37 @@ describe('RSS и Atom', () => {
     assert.equal(parseFeed(FEED, feed(undated, at('b', 2), at('a', 1), at('c', 3)), 2).skipped, 1, 'поровну — как обычная лента, от новых к старым');
   });
 
-  it('BOM UTF-16 — кодировка документа; объявление UTF-16 без BOM — UTF-8', async () => {
-    const read = async (bytes: Uint8Array<ArrayBuffer>) => (await readText(async () => new Response(bytes), 'https://e.com/')).text;
+  it('BOM UTF-16 — кодировка документа; объявление UTF-16 без BOM пропускается', async () => {
+    const read = async (bytes: Uint8Array<ArrayBuffer>, contentType?: string) =>
+      (await readText(async () => new Response(bytes, contentType ? { headers: { 'content-type': contentType } } : {}), 'https://e.com/')).text;
     const le = Uint8Array.from(Buffer.from('﻿Привет', 'utf16le'));
     const be = Uint8Array.from(Buffer.from('﻿Привет', 'utf16le').swap16());
     assert.equal(await read(le), 'Привет');
     assert.equal(await read(be), 'Привет');
     const decl = '<?xml version="1.0" encoding="UTF-16"?><rss/>';
     assert.equal(await read(new TextEncoder().encode(decl)), decl);
+    const cp1251 = Uint8Array.of(0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2); // «Привет»
+    const lying = Uint8Array.from([...new TextEncoder().encode(decl), ...cp1251]);
+    assert.equal(await read(lying, 'text/xml; charset=windows-1251'), `${decl}Привет`, 'ложное объявление не глушит заголовок');
+  });
+
+  it('начало тега без «>» до конца текста не показывается; «<» перед пробелом или цифрой — текст', () => {
+    assert.equal(htmlToText('текст <img src="x'), 'текст');
+    assert.equal(htmlToText('а </di'), 'а');
+    assert.equal(htmlToText('до <!-- без конца и без скобки'), 'до');
+    assert.equal(htmlToText('а <?php'), 'а');
+    assert.equal(htmlToText('3 < 5 и 2 <3'), '3 < 5 и 2 <3');
+    assert.equal(htmlToText('3 < 5 <b'), '3 < 5');
+    // Тег, разрезанный пределом элемента: у ленты без заголовков текст поста — описание.
+    const image = `<img src="data:image/png;base64,${'A'.repeat(MAX_ELEMENT_SOURCE)}">`;
+    const date = new Date(NOW - HOUR);
+    const rss = (description: string) =>
+      `<rss><channel><item><guid>https://e.com/1</guid><pubDate>${date.toUTCString()}</pubDate><description><![CDATA[${description}]]></description></item></channel></rss>`;
+    assert.deepEqual(parseFeed(FEED, rss(`${image}Текст`), 10).posts.map((p) => p.text), [''], 'обрубок тега — не текст');
+    assert.deepEqual(parseFeed(FEED, rss(`Текст${image}`), 10).posts.map((p) => p.text), ['Текст']);
+    const escaped = image.split('<').join('&lt;').split('>').join('&gt;');
+    const atom = `<feed><entry><id>a</id><link href="https://e.com/a"/><updated>${date.toISOString()}</updated><content type="html">${escaped}Текст</content></entry></feed>`;
+    assert.deepEqual(parseFeed(FEED, atom, 10).posts.map((p) => p.text), ['']);
   });
 
   it('«снова читаются» доставлено — обещание частичного алерта снято, полный сбой ждёт суток', async () => {

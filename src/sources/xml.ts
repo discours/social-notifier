@@ -73,6 +73,8 @@ export function plainText(text: string): string {
 
 const LINE_BREAK = /^br\s*\/?$/i;
 const BLOCK_END = /^\/(p|div|li|h[1-6]|blockquote)$/i;
+/** Символ после «<», с которого в HTML начинается тег, комментарий или объявление; иначе «<» — текст. */
+const TAG_START = /[A-Za-z/!?]/;
 
 /** HTML описания поста в простой текст: абзацы и переносы — новые строки, теги и комментарии — прочь. */
 export function htmlToText(source: string): string {
@@ -96,8 +98,14 @@ export function htmlToText(source: string): string {
       commentEnds = false;
     }
     const gt = html.indexOf('>', lt + 1);
-    // Дальше нет ни одного «>», значит, и тегов нет: остаток — текст как есть.
-    if (gt === -1) break;
+    if (gt === -1) {
+      // Дальше нет ни одного «>», значит, и законченных тегов нет. Начало тега
+      // без конца — так выглядит и тег, разрезанный пределом MAX_ELEMENT_SOURCE, —
+      // браузер не показывает, и здесь остаток с него отбрасывается; прочие «<» — текст.
+      let cut = lt;
+      while (cut !== -1 && !TAG_START.test(html[cut + 1] ?? '')) cut = html.indexOf('<', cut + 1);
+      return plainText(decodeEntities(out + (cut === -1 ? html.slice(pos) : html.slice(pos, cut))));
+    }
     const tag = html.slice(lt + 1, gt);
     out += html.slice(pos, lt) + (LINE_BREAK.test(tag) || BLOCK_END.test(tag) ? '\n' : '');
     pos = gt + 1;

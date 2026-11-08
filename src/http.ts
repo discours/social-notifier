@@ -89,7 +89,8 @@ const HEADER_CHARSET = /;\s*charset\s*=\s*"?([\w.:-]{1,40})/i;
 
 /**
  * Кодировка ответа: метка порядка байтов, затем объявление `<?xml … encoding>`
- * в начале документа, затем charset из Content-Type, иначе UTF-8. Объявление
+ * в начале документа (кроме UTF-16 без BOM), затем charset из Content-Type,
+ * иначе UTF-8. Объявление
  * важнее заголовка: его пишет автор ленты, а заголовок — настройка сервера,
  * которая чаще врёт. Без этого лента в windows-1251 пришла бы знаками «�».
  */
@@ -101,8 +102,9 @@ export function decoderFor(contentType: string | null, bytes: Uint8Array): TextD
   const head = String.fromCharCode(...bytes.subarray(0, 256));
   const declared = XML_ENCODING.exec(head)?.[1];
   // Объявление прочиталось побайтово, значит, документ не в UTF-16: без BOM
-  // такая метка врёт, и браузеры читают его как UTF-8.
-  const label = declared !== undefined && /^utf-?16/i.test(declared) ? 'utf-8' : (declared ?? HEADER_CHARSET.exec(contentType ?? '')?.[1]);
+  // такая метка врёт и пропускается — дальше заголовок, иначе UTF-8.
+  const trusted = declared !== undefined && !/^utf-?16/i.test(declared) ? declared : undefined;
+  const label = trusted ?? HEADER_CHARSET.exec(contentType ?? '')?.[1];
   if (label !== undefined) {
     try {
       return new TextDecoder(label);
