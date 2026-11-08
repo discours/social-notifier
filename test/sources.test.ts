@@ -5,7 +5,7 @@ import { parseConfig } from '../src/config.ts';
 import { ALL_SECRETS, SOURCE_SECRETS } from '../src/env.ts';
 import { SourceError } from '../src/errors.ts';
 import { failureHint, formatDuration, formatFailureAlert, recordFailure, recordSuccess } from '../src/health.ts';
-import type { FetchLike } from '../src/http.ts';
+import { readText, type FetchLike } from '../src/http.ts';
 import { classifyBlueskyError, fetchBlueskyPosts, type BlueskySource } from '../src/sources/bluesky.ts';
 import { feedUrl, fetchFeedPosts, parseFeed, type FeedSource } from '../src/sources/feed.ts';
 import { allAdapters, findAdapter, SOURCE_TYPES, type SourceContext } from '../src/sources/index.ts';
@@ -269,6 +269,9 @@ describe('RSS и Atom', () => {
       item(`<description>${'&lt;'.repeat(80_000)}</description>`),
       `<feed><entry><id>a</id><link ${'h'.repeat(100_000)}/><updated>2026-10-19T09:58:39Z</updated></entry></feed>`,
       `<rss><channel>${'<item><guid>'.repeat(30_000)}</channel></rss>`,
+      `${'<!a>'.repeat(400_000)}<rss><channel></channel></rss>`,
+      `<rss><channel>${'<![CDATA[a]]>'.repeat(100_000)}<!-- x --></channel></rss>`,
+      `<feed><entry><id>a</id>${'<source>'.repeat(100_000)}</entry></feed>`,
     ];
     const started = performance.now();
     // Повторный поиск «>» после каждого «<» тоже квадратичен, просто быстр: ловится только объёмом.
@@ -321,8 +324,63 @@ describe('RSS и Atom', () => {
     const feed = (extra: string) => `<rss><channel>${good(1)}${good(2)}${good(3)}${extra}</channel></rss>`;
     assert.deepEqual(parseFeed(FEED, feed(noLink(100)), 2), { posts: parseFeed(FEED, feed(''), 2).posts, skipped: 0 });
     assert.equal(parseFeed(FEED, feed(noLink(0)), 2).skipped, 1, 'новее оставленных — могла бы прийти');
-    assert.equal(parseFeed(FEED, feed(noLink(100)), 10).skipped, 1, 'все записи в выдаче — считается любая');
-    assert.equal(parseFeed(FEED, feed('<item><guid>x</guid><link>https://e.com/x</link></item>'), 2).skipped, 1, 'без даты — неизвестно, свежая ли');
+    assert.equal(parseFeed(FEED, feed(noLink(100)), 10).skipped, 1, 'все записи в выдаче, порога нет — считается любая');
+    assert.equal(parseFeed(FEED, feed(noLink(100)), 10, NOW - 48 * HOUR).skipped, 0, 'старше maxPostAgeHours — ничего не теряет');
+    assert.equal(parseFeed(FEED, feed(noLink(5)), 10, NOW - 48 * HOUR).skipped, 1, 'свежая битая запись — сбой');
+    const undated = '<item><guid>x</guid><link>https://e.com/x</link></item>';
+    assert.equal(parseFeed(FEED, `<rss><channel>${undated}${good(1)}${good(2)}${good(3)}</channel></rss>`, 2).skipped, 1, 'без даты в голове ленты — могла быть новой');
+    assert.equal(parseFeed(FEED, feed(undated), 2).skipped, 0, 'без даты в хвосте ленты — старая');
+  });
+
+  it('радар передаёт ленте порог свежести: старая битая запись не даёт алерта', async () => {
+    const good = (i: number) =>
+      `<item><guid>g${i}</guid><link>https://e.com/${i}</link><pubDate>${new Date(NOW - i * HOUR).toUTCString()}</pubDate><title>Пост ${i}</title></item>`;
+    const rss = `<rss><channel>${good(1)}${good(2)}<item><guid>old</guid><pubDate>${new Date(NOW - 900 * HOUR).toUTCString()}</pubDate></item></channel></rss>`;
+    const alerts: string[] = [];
+    const fetch: FetchLike = async (input, init) => {
+      if (new URL(input).hostname === 'api.telegram.org') {
+        alerts.push((JSON.parse(String(init?.body)) as { text: string }).text);
+        return json({ ok: true, result: {} });
+      }
+      return text(rss);
+    };
+    const config = testConfig({ fetchLimit: 20, sources: [{ id: 'blog', type: 'feed', label: 'Блог', url: 'https://e.com/feed' }] });
+    const state = emptyState();
+    for (const at of [NOW, NOW + 10 * MINUTE, NOW + 20 * MINUTE]) {
+      await runRadar(state, { config, secrets: SECRETS, fetch, now: () => at, log: () => {}, redact: (t) => t, sleep: async () => {} });
+    }
+    assert.equal(state.sources.blog?.consecutiveFailures, 0);
+    assert.deepEqual(alerts.filter((m) => m.includes('не читается') || m.includes('не читаются')), []);
+  });
+
+  it('закомментированная запись не приходит; «<!--» внутри CDATA — просто текст', () => {
+    const rss = `<rss><channel><!-- <item><guid>draft</guid><link>https://e.com/draft</link><pubDate>Mon, 19 Oct 2026 09:58:39 +0000</pubDate><title>Черновик</title></item> -->
+      <item><guid>a</guid><link>https://e.com/a</link><pubDate>Mon, 19 Oct 2026 09:58:39 +0000</pubDate><title><![CDATA[Про <!-- комментарии -->]]></title></item></channel></rss>`;
+    assert.deepEqual(parseFeed(FEED, rss, 10), {
+      posts: [{ sourceId: 'mastodon', id: 'a', url: 'https://e.com/a', publishedAt: Date.parse('2026-10-19T09:58:39Z'), text: 'Про <!-- комментарии -->' }],
+      skipped: 0,
+    });
+  });
+
+  it('вложенный <source> записи Atom не подменяет её id, ссылку и заголовок', () => {
+    const entry = (n: number) => `<entry><source><id>urn:planet:orig</id><link href="https://planet.example/"/><title>Планета</title></source>
+      <id>urn:post:${n}</id><link href="https://e.com/${n}"/><title>Пост ${n}</title><updated>2026-10-19T0${n}:00:00Z</updated></entry>`;
+    const { posts } = parseFeed(FEED, `<feed>${entry(1)}${entry(2)}</feed>`, 10);
+    assert.deepEqual(posts.map((p) => [p.id, p.url, p.text]), [
+      ['urn:post:2', 'https://e.com/2', 'Пост 2'],
+      ['urn:post:1', 'https://e.com/1', 'Пост 1'],
+    ]);
+  });
+
+  it('записи с префиксом пространства имён — ошибка формата, а не вечное «новых нет»', () => {
+    const rdf = `<rdf:RDF><rss:channel><rss:title>t</rss:title></rss:channel><rss:item><rss:link>https://e.com/a</rss:link></rss:item></rdf:RDF>`;
+    assert.throws(() => parseFeed(FEED, rdf, 10), (e) => e instanceof SourceError && e.kind === 'bad_response' && /rss:item/.test(e.message));
+  });
+
+  it('у content Atom с MIME-типом text/html теги снимаются', () => {
+    const atom = `<feed><entry><id>a</id><link href="https://e.com/a"/><updated>2026-10-19T09:58:39Z</updated>
+      <content type="text/html">&lt;p&gt;Абзац&lt;/p&gt;</content></entry></feed>`;
+    assert.equal(parseFeed(FEED, atom, 10).posts[0]?.text, 'Абзац');
   });
 
   it('у выпуска подкаста без <link> ссылка — файл из <enclosure>', () => {
@@ -331,9 +389,39 @@ describe('RSS и Atom', () => {
     assert.deepEqual(parseFeed(FEED, rss, 10).posts.map((p) => [p.id, p.url]), [['ep-12', 'https://cdn.e.com/ep12.mp3']]);
   });
 
-  it('ответ больше 10 МБ не дочитывается; перенаправление на http — отказ', async () => {
-    const huge = fakeFetch(() => text(`<rss><channel>${' '.repeat(11 * 1024 * 1024)}</channel></rss>`));
-    await assert.rejects(fetchFeedPosts(FEED, ctx(huge.fetch)), (e) => e instanceof SourceError && e.kind === 'bad_response' && /10 МБ/.test(e.message));
+  it('ответ больше 32 МБ не дочитывается: тело читается потоком, и чтение отменяется', async () => {
+    const chunk = new Uint8Array(1024 * 1024).fill(0x20);
+    let pulled = 0;
+    let cancelled = false;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        if (pulled > 80) controller.close();
+        else controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const huge = fakeFetch(() => new Response(endless, { status: 200 }));
+    await assert.rejects(fetchFeedPosts(FEED, ctx(huge.fetch)), (e) => e instanceof SourceError && e.kind === 'bad_response' && /32 МБ/.test(e.message));
+    assert.ok(pulled <= 34, `прочитано кусков по 1 МБ: ${pulled}`);
+    assert.ok(cancelled, 'чтение тела отменено');
+  });
+
+  it('UTF-8, разрезанный между кусками ответа, собирается без потерь', async () => {
+    const bytes = new TextEncoder().encode('Привет, мир 👋 — «ёж»');
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const byte of bytes) controller.enqueue(Uint8Array.of(byte));
+        controller.close();
+      },
+    });
+    const { text: body } = await readText(async () => new Response(stream), 'https://e.com/');
+    assert.equal(body, 'Привет, мир 👋 — «ёж»');
+  });
+
+  it('перенаправление на http — отказ, на https — как обычно', async () => {
     const downgraded = fakeFetch(() => {
       const res = text(MASTODON_RSS);
       Object.defineProperty(res, 'url', { value: 'http://mastodon.social/@Mastodon.rss' });
@@ -620,7 +708,7 @@ describe('алерты для людей', () => {
     const lines = formatFailureAlert(VK_SOURCE, state, err, { now: NOW, maxPostAgeHours: 48, fetchLimit: 25, runUrl: 'https://github.com/o/r/actions/runs/1' }).html.split('\n');
     assert.equal(lines[0], '<b>VK</b>: посты не читаются, уже 20 мин.');
     assert.match(lines[1] ?? '', /^Что сделать: выпустите новый токен/);
-    assert.equal(lines[2], 'Посты, вышедшие за это время, придут после починки, если им будет меньше 48 ч и их наберётся не больше 25.');
+    assert.equal(lines[2], 'Посты, вышедшие за это время, придут после починки — из последних 25 и не старше 48 ч.');
     assert.equal(lines[3], 'Причина: <code>auth</code> — VK API 5: User authorization failed');
     assert.equal(lines[4], '<a href="https://github.com/o/r/actions/runs/1">Лог запуска</a>');
     recordSuccess(state);

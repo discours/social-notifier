@@ -248,6 +248,8 @@ describe('runRadar: алерты', () => {
     const alerts = world.alertMessages();
     assert.equal(alerts.length, 1);
     assert.ok(alerts[0]?.includes('не разобрано элементов ответа: 1 из'));
+    assert.match(alerts[0] ?? '', /: часть постов не читается, /, 'алерт не обещает потерю всего');
+    assert.match(alerts[0] ?? '', /Разобранные посты приходят как обычно\./);
   });
 
   it('источник, сломанный с первого запуска, после починки присылает посты, вышедшие за это время', async () => {

@@ -1,19 +1,17 @@
 /**
  * Проба доступов: читает каждый источник и показывает, что видит токен Meta.
  * Ничего не отправляет (кроме тестового сообщения с флагом --send-test) и не
- * меняет состояние. Печатает только счётчики, ID и даты: лог публичный.
+ * меняет состояние. Лог публичный, поэтому печатает только счётчики, ID, даты
+ * и публичные названия страниц и аккаунтов, которые видит токен Meta.
  */
 import { parseArgs } from 'node:util';
 import { loadConfig } from './config.ts';
 import { readSecrets, secretValues } from './env.ts';
 import { toSourceError } from './errors.ts';
-import { fetchSourcePosts } from './sources/index.ts';
+import { adapterFor, fetchSourcePosts } from './sources/index.ts';
 import { graphGet } from './sources/meta.ts';
 import { checkChatAccess, getBotIdentity, sendTelegramMessage } from './telegram.ts';
 import { asString, isRecord, makeRedactor } from './util.ts';
-
-/** Сколько последних постов проба читает у каждой сети: меньше X API не отдаёт. */
-export const PROBE_FETCH_LIMIT = 5;
 
 const { values } = parseArgs({
   options: {
@@ -29,14 +27,17 @@ const fetchFn = globalThis.fetch;
 
 async function main(): Promise<number> {
   const config = loadConfig(values.config);
-  // Пробе хватит нескольких постов, а X берёт деньги за каждый прочитанный.
-  const ctx = { config: { ...config, fetchLimit: Math.min(config.fetchLimit, PROBE_FETCH_LIMIT) }, secrets, fetch: fetchFn };
+  const ctx = { config, secrets, fetch: fetchFn, notBefore: Date.now() - config.maxPostAgeHours * 60 * 60 * 1000 };
   let failed = 0;
 
   log('== Источники ==');
   for (const source of config.sources) {
     try {
-      const { posts, skipped } = await fetchSourcePosts(source, ctx);
+      // Проба читает столько же, сколько радар, и видит те же неразобранные
+      // записи; платная сеть — меньше, потому что каждый пост стоит денег.
+      const { probeLimit } = adapterFor(source);
+      const fetchLimit = probeLimit === undefined ? config.fetchLimit : Math.min(config.fetchLimit, probeLimit);
+      const { posts, skipped } = await fetchSourcePosts(source, { ...ctx, config: { ...config, fetchLimit } });
       const latest = posts.reduce<(typeof posts)[number] | undefined>(
         (best, p) => (best === undefined || p.publishedAt > best.publishedAt ? p : best),
         undefined,

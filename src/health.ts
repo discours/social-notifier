@@ -85,7 +85,7 @@ export function failureHint(kind: FailureKind, source: SourceConfig): string {
     case 'http':
       return 'обычно ничего: сбой на стороне сети проходит сам. Если алерт повторится через сутки, откройте лог запуска.';
     case 'bad_response':
-      return 'откройте лог запуска: сеть ответила в незнакомом формате — возможно, поменяла API, и коду нужна правка.';
+      return 'откройте лог запуска: ответ сети не разобрался, подробности — в причине ниже. Если сеть поменяла формат ответа, коду нужна правка.';
   }
 }
 
@@ -114,6 +114,8 @@ export interface AlertContext {
   maxPostAgeHours: number;
   /** Сколько последних постов радар читает за раз: вышедшие сверх этого за время сбоя он не увидит. */
   fetchLimit: number;
+  /** Ответ разобрался не целиком: разобранные посты уже идут в очередь. */
+  partial?: boolean;
   runUrl?: string;
 }
 
@@ -126,10 +128,13 @@ export function formatFailureAlert(source: SourceConfig, state: SourceState, err
     state.failingSince === undefined
       ? `сбоев подряд: ${state.consecutiveFailures}`
       : `уже ${formatDuration(ctx.now - state.failingSince)}`;
+  const range = `из последних ${ctx.fetchLimit} и не старше ${ctx.maxPostAgeHours} ч`;
   const lines = [
-    `<b>${escapeHtml(source.label)}</b>: посты не читаются, ${since}.`,
+    `<b>${escapeHtml(source.label)}</b>: ${ctx.partial ? 'часть постов не читается' : 'посты не читаются'}, ${since}.`,
     `Что сделать: ${escapeHtml(failureHint(err.kind, source))}`,
-    `Посты, вышедшие за это время, придут после починки, если им будет меньше ${ctx.maxPostAgeHours} ч и их наберётся не больше ${ctx.fetchLimit}.`,
+    ctx.partial
+      ? `Разобранные посты приходят как обычно. Остальные придут после починки, если окажутся ${range}.`
+      : `Посты, вышедшие за это время, придут после починки — ${range}.`,
     `Причина: <code>${err.kind}</code> — ${escapeHtml(err.message)}`,
   ];
   if (ctx.runUrl) lines.push(`<a href="${escapeHtml(ctx.runUrl)}">Лог запуска</a>`);

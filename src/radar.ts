@@ -66,7 +66,7 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
 
   for (const source of config.sources) {
     const sourceState = sourceStateOf(state, source.id, now);
-    const fail = (error: SourceError): void => {
+    const fail = (error: SourceError, partial = false): void => {
       const shouldAlert = recordFailure(sourceState, error, now);
       log(
         `${source.id}: ошибка ${error.kind}${error.code ? ` (${error.code})` : ''}: ${error.message}; ` +
@@ -79,6 +79,7 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
             now,
             maxPostAgeHours: config.maxPostAgeHours,
             fetchLimit: config.fetchLimit,
+            partial,
             ...(deps.runUrl ? { runUrl: deps.runUrl } : {}),
           }),
           onSent: () => markAlertSent(sourceState, now),
@@ -93,6 +94,7 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
         secrets: deps.secrets,
         fetch: deps.fetch,
         known: sourceState.seen,
+        notBefore: now - config.maxPostAgeHours * HOUR,
       });
     } catch (err) {
       fail(toSourceError(err, deps.redact));
@@ -103,7 +105,7 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
     if (skipped > 0) {
       // Среди нераспознанных элементов может быть новый пост. Это сбой
       // источника (два запуска подряд — алерт), но разобранные посты идут дальше.
-      fail(new SourceError('bad_response', `не разобрано элементов ответа: ${skipped} из ${skipped + posts.length}`));
+      fail(new SourceError('bad_response', `не разобрано элементов ответа: ${skipped} из ${skipped + posts.length}`), true);
     } else if (recordSuccess(sourceState)) {
       alerts.push({
         message: formatRecoveryNotice(source),

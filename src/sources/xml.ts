@@ -137,6 +137,52 @@ function* elements(xml: string, name: string): Generator<XmlElement & { selfClos
   }
 }
 
+/**
+ * Документ без комментариев `<!-- … -->`: закомментированная запись — не пост.
+ * Секции CDATA остаются как есть, даже если в их тексте есть «<!--».
+ */
+export function stripComments(xml: string): string {
+  let out = '';
+  let pos = 0;
+  // Следующие позиции ищутся заново, только когда разбор их миновал: так
+  // документ просматривается один раз, сколько бы в нём ни было секций.
+  let comment = xml.indexOf('<!--');
+  let cdata = xml.indexOf('<![CDATA[');
+  while (comment !== -1) {
+    if (cdata !== -1 && cdata < comment) {
+      const end = xml.indexOf(']]>', cdata + 9);
+      if (end === -1) break;
+      out += xml.slice(pos, end + 3);
+      pos = end + 3;
+    } else {
+      out += xml.slice(pos, comment);
+      const end = xml.indexOf('-->', comment + 4);
+      if (end === -1) return out;
+      pos = end + 3;
+    }
+    if (comment < pos) comment = xml.indexOf('<!--', pos);
+    if (cdata !== -1 && cdata < pos) cdata = xml.indexOf('<![CDATA[', pos);
+  }
+  return out + xml.slice(pos);
+}
+
+/** Текст без элементов `<name>…</name>` и `<name/>`: так из записи Atom убирается вложенный `<source>`. */
+export function removeElements(xml: string, name: string): string {
+  let out = '';
+  let pos = 0;
+  for (;;) {
+    const open = openTag(xml, name, pos);
+    if (!open) break;
+    const gt = xml.indexOf('>', open.attrsStart);
+    if (gt === -1) break;
+    const end = xml[gt - 1] === '/' ? gt + 1 : closeTag(xml, name, gt + 1)?.end;
+    if (end === undefined) break;
+    out += xml.slice(pos, open.start);
+    pos = end;
+  }
+  return out + xml.slice(pos);
+}
+
 /** Содержимое элементов `<name>…</name>` верхнего уровня; `<name/>` — не запись, пропускается. */
 export function blocks(xml: string, name: string): string[] {
   const out: string[] = [];
@@ -217,13 +263,19 @@ export function rootElement(xml: string): string | undefined {
       pos = end + 3;
     } else if (xml.startsWith('<!', lt)) {
       // DOCTYPE, возможно, с внутренним подмножеством `[…]`, в котором свои «>».
+      // «[» ищется только внутри этого тега: поиск до конца документа на каждом
+      // `<!…>` давал квадрат на ленте из тысяч `<!a>`.
       const gt = xml.indexOf('>', lt);
-      const bracket = xml.indexOf('[', lt);
-      const subsetEnd = bracket !== -1 && (gt === -1 || bracket < gt) ? xml.indexOf(']', bracket) : lt;
-      if (gt === -1 || subsetEnd === -1) return undefined;
-      const end = xml.indexOf('>', subsetEnd);
-      if (end === -1) return undefined;
-      pos = end + 1;
+      if (gt === -1) return undefined;
+      const bracket = xml.slice(lt, gt).indexOf('[');
+      if (bracket === -1) {
+        pos = gt + 1;
+      } else {
+        const subsetEnd = xml.indexOf(']', lt + bracket);
+        const end = subsetEnd === -1 ? -1 : xml.indexOf('>', subsetEnd);
+        if (end === -1) return undefined;
+        pos = end + 1;
+      }
     } else {
       return /^<([A-Za-z_][\w:.-]*)/.exec(xml.slice(lt, lt + 128))?.[1];
     }

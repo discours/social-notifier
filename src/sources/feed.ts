@@ -5,7 +5,19 @@ import type { ParsedPosts, Post } from '../types.ts';
 import { httpUrl, isPlausibleTime } from '../util.ts';
 import type { SourceAdapter, SourceBase, SourceContext } from './adapter.ts';
 import { collectPosts } from './parse.ts';
-import { blocks, childElement, childText, htmlToText, plainText, rootElement, tagAttributes, textContent, type XmlElement } from './xml.ts';
+import {
+  blocks,
+  childElement,
+  childText,
+  htmlToText,
+  plainText,
+  removeElements,
+  rootElement,
+  stripComments,
+  tagAttributes,
+  textContent,
+  type XmlElement,
+} from './xml.ts';
 
 /**
  * Лента RSS 2.0 или Atom 1.0: Mastodon (`https://mastodon.social/@имя.rss`),
@@ -63,7 +75,7 @@ export async function fetchFeedPosts(source: FeedSource, ctx: SourceContext): Pr
   if (status === 401 || status === 403) throw new SourceError('permission', `лента ответила HTTP ${status}`);
   if (status === 404 || status === 410) throw new SourceError('config', `лента не найдена (HTTP ${status})`);
   if (status >= 400) throw new SourceError('http', `лента ответила HTTP ${status}`);
-  return parseFeed(source, text, ctx.config.fetchLimit);
+  return parseFeed(source, text, ctx.config.fetchLimit, ctx.notBefore);
 }
 
 /** Запись ленты: пост, если разобралась, и время, если оно нашлось. */
@@ -77,20 +89,31 @@ interface Entry {
  * угодно, а радар помнит ограниченное число ID: сотни старых записей вытеснили
  * бы из памяти уже отправленные посты, и те пришли бы снова.
  */
-export function parseFeed(source: SourceBase, xml: string, limit: number): ParsedPosts {
-  const root = rootElement(xml);
+export function parseFeed(source: SourceBase, xml: string, limit: number, notBefore = -Infinity): ParsedPosts {
+  const doc = stripComments(xml);
+  const root = rootElement(doc);
   const isAtom = root === 'feed';
   if (!isAtom && root !== 'rss' && root !== 'rdf:RDF') throw new SourceError('bad_response', 'по адресу ленты не RSS и не Atom');
-  const entries = blocks(xml, isAtom ? 'entry' : 'item').map((block) => (isAtom ? atomEntry(source, block) : rssItem(source, block)));
+  const found = blocks(doc, isAtom ? 'entry' : 'item');
+  if (found.length === 0 && PREFIXED_ENTRY.test(doc)) {
+    // Иначе такая лента навсегда выглядела бы как «новых постов нет».
+    throw new SourceError('bad_response', 'записи ленты с префиксом пространства имён (например, rss:item) не поддерживаются');
+  }
+  // `<source>` в записи Atom описывает ленту-первоисточник со своими id и ссылкой.
+  const entries = found.map((block) => (isAtom ? atomEntry(source, removeElements(block, 'source')) : rssItem(source, block)));
   const { posts } = collectPosts(entries, (entry) => entry.post, 'Лента');
   const newest = posts.sort((a, b) => b.publishedAt - a.publishedAt).slice(0, limit);
-  // Неразобранная запись считается, только если могла попасть в выдачу: старая
-  // запись без ссылки за пределами `limit` свежих ничего не теряет, а алерт
-  // из-за неё приходил бы раз в сутки, пока она в ленте.
+  // Неразобранная запись — сбой, только если из-за неё мог потеряться пост:
+  // она не старше `notBefore` и попала бы в `limit` свежих. Запись без даты —
+  // если стоит среди первых `limit` записей: ленты идут от новых к старым.
+  // Иначе одна старая битая запись давала бы алерт раз в сутки, пока она в ленте.
   const oldestKept = newest.length === limit ? (newest.at(-1)?.publishedAt ?? -Infinity) : -Infinity;
-  const skipped = entries.filter((e) => !e.post && (e.publishedAt === undefined || e.publishedAt >= oldestKept)).length;
+  const threshold = Math.max(oldestKept, notBefore);
+  const skipped = entries.filter((e, i) => !e.post && (e.publishedAt === undefined ? i < limit : e.publishedAt >= threshold)).length;
   return { posts: newest, skipped };
 }
+
+const PREFIXED_ENTRY = /<[A-Za-z_][\w.-]*:(?:item|entry)[\s>/]/;
 
 function rssItem(source: SourceBase, item: string): Entry {
   const publishedAt = feedTime(childText(item, 'pubDate') ?? childText(item, 'dc:date'));
@@ -121,12 +144,17 @@ function atomEntry(source: SourceBase, entry: string): Entry {
   return { publishedAt, post: { sourceId: source.id, id, url, publishedAt, text } };
 }
 
-/** Текст Atom по атрибуту `type`: `text` (по умолчанию), `html` или `xhtml`. */
+/**
+ * Текст Atom по атрибуту `type`: `text` (по умолчанию), `html` или `xhtml`.
+ * У `<content>` там может стоять и MIME-тип: `text/html`, `text/plain`.
+ */
 function atomText(element: XmlElement): string {
-  const type = element.attrs.type ?? 'text';
-  if (type === 'html') return htmlToText(textContent(element.inner));
-  if (type === 'xhtml') return htmlToText(element.inner);
-  return plainText(textContent(element.inner));
+  const type = (element.attrs.type ?? 'text').toLowerCase();
+  if (type === 'html' || type === 'text/html') return htmlToText(textContent(element.inner));
+  if (type === 'xhtml' || type === 'application/xhtml+xml') return htmlToText(element.inner);
+  if (type === 'text' || type.startsWith('text/')) return plainText(textContent(element.inner));
+  // Прочие MIME-типы (картинка, base64) — не текст поста.
+  return '';
 }
 
 function entryId(raw: string | undefined): string | undefined {

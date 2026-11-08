@@ -32,6 +32,7 @@ export const xAdapter: SourceAdapter<XSource> = {
   network: 'X',
   secrets: ['X_BEARER_TOKEN'],
   docs: 'docs/sources/x.md',
+  probeLimit: MIN_RESULTS,
   parse(raw, base, issues) {
     const { userId, username } = raw;
     if (typeof userId !== 'string' || !USER_ID.test(userId)) {

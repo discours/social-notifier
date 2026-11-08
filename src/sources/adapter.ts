@@ -28,6 +28,12 @@ export interface SourceContext {
    * может просить только более новые; проба передаёт пустой список.
    */
   known?: readonly string[];
+  /**
+   * Посты, вышедшие раньше этого момента, радар не пришлёт (`maxPostAgeHours`).
+   * Неразобранную запись старше него адаптер может не считать сбоем: она
+   * ничего не теряет, а алерт из-за неё приходил бы вечно.
+   */
+  notBefore?: number;
 }
 
 /** Куда адаптер складывает ошибки разбора своих полей конфига. */
@@ -50,6 +56,8 @@ export interface SourceAdapter<S extends SourceBase & { type: string }> {
   readonly secrets: readonly SourceSecret[];
   /** Страница настройки сети, путь от корня репозитория. */
   readonly docs: string;
+  /** Сколько постов читает проба, если меньше `fetchLimit`: у платной сети каждый прочитанный стоит денег. */
+  readonly probeLimit?: number;
   /** Поля источника из конфига, кроме общих. Ошибки — в `issues`, тогда результат undefined. */
   parse(raw: Record<string, unknown>, base: SourceBase, issues: ConfigIssues): S | undefined;
   /** Последние посты источника, не больше `ctx.config.fetchLimit`. */
