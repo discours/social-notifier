@@ -6,6 +6,7 @@ import {
   formatFailureAlert,
   formatRecoveryNotice,
   markAlertSent,
+  markRecoverySent,
   recordFailure,
   recordSuccess,
   REALERT_AFTER_MS,
@@ -112,9 +113,7 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
     } else if (recordSuccess(sourceState)) {
       alerts.push({
         message: formatRecoveryNotice(source),
-        onSent: () => {
-          delete sourceState.alertOpen;
-        },
+        onSent: () => markRecoverySent(sourceState),
       });
     }
 

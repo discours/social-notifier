@@ -32,7 +32,9 @@ export const MAX_URL_LENGTH = 2048;
  * `javascript:` и прочее — undefined, и адаптер берёт запасную ссылку.
  */
 export function httpUrl(value: unknown): string | undefined {
-  if (typeof value !== 'string' || value === '') return undefined;
+  // Длина — до разбора: разбор punycode в URL квадратичен по длине имени
+  // хоста, и ссылка в сотни килобайт останавливала бы опрос на секунды.
+  if (typeof value !== 'string' || value === '' || value.length > MAX_URL_LENGTH) return undefined;
   try {
     const url = new URL(value);
     if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined;

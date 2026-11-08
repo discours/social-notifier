@@ -115,11 +115,22 @@ export function parseFeed(source: SourceBase, xml: string, limit: number, notBef
   return { posts: newest, skipped };
 }
 
-/** Лента идёт от старых к новым: первая запись с датой старше последней. */
+/**
+ * Лента идёт от старых к новым: соседних записей с датой «раньше → позже»
+ * больше, чем обратных. По двум крайним записям судить нельзя: закреплённая
+ * старая запись наверху ленты от новых к старым перевернула бы вывод.
+ */
 function isOldestFirst(entries: readonly Entry[]): boolean {
-  const first = entries.find((e) => e.publishedAt !== undefined)?.publishedAt;
-  const last = entries.findLast((e) => e.publishedAt !== undefined)?.publishedAt;
-  return first !== undefined && last !== undefined && first < last;
+  let rising = 0;
+  let falling = 0;
+  let previous: number | undefined;
+  for (const { publishedAt } of entries) {
+    if (publishedAt === undefined) continue;
+    if (previous !== undefined && publishedAt > previous) rising += 1;
+    if (previous !== undefined && publishedAt < previous) falling += 1;
+    previous = publishedAt;
+  }
+  return rising > falling;
 }
 
 const PREFIXED_ENTRY = /<[A-Za-z_][\w.-]*:(?:item|entry)[\s>/]/;

@@ -35,19 +35,31 @@ export function decodeEntities(text: string): string {
   });
 }
 
-/** Содержимое `<![CDATA[…]]>` как есть, остальное — с раскрытыми сущностями. */
+/**
+ * Текст элемента и значение атрибута длиннее этого целиком не разбираются.
+ * От поста хранится 1000 символов (MAX_STORED_TEXT), а раскрытие миллионов
+ * сущностей в чужом мегабайтном тексте съедало гигабайты памяти и роняло
+ * запуск всех сетей. Предел в десятки раз больше предела ссылки: обрезанная
+ * ссылка всё равно длиннее допустимой и не примется.
+ */
+export const MAX_ELEMENT_SOURCE = 100_000;
+
+const bounded = (text: string) => (text.length > MAX_ELEMENT_SOURCE ? text.slice(0, MAX_ELEMENT_SOURCE) : text);
+
+/** Содержимое `<![CDATA[…]]>` как есть, остальное — с раскрытыми сущностями; не длиннее MAX_ELEMENT_SOURCE. */
 export function textContent(inner: string): string {
+  const source = bounded(inner);
   let out = '';
   let pos = 0;
   for (;;) {
-    const start = inner.indexOf('<![CDATA[', pos);
+    const start = source.indexOf('<![CDATA[', pos);
     if (start === -1) break;
-    const end = inner.indexOf(']]>', start + 9);
+    const end = source.indexOf(']]>', start + 9);
     if (end === -1) break;
-    out += decodeEntities(inner.slice(pos, start)) + inner.slice(start + 9, end);
+    out += decodeEntities(source.slice(pos, start)) + source.slice(start + 9, end);
     pos = end + 3;
   }
-  return (out + decodeEntities(inner.slice(pos))).trim();
+  return (out + decodeEntities(source.slice(pos))).trim();
 }
 
 /** Непустые строки текста без пробелов по краям. */
@@ -63,7 +75,8 @@ const LINE_BREAK = /^br\s*\/?$/i;
 const BLOCK_END = /^\/(p|div|li|h[1-6]|blockquote)$/i;
 
 /** HTML описания поста в простой текст: абзацы и переносы — новые строки, теги и комментарии — прочь. */
-export function htmlToText(html: string): string {
+export function htmlToText(source: string): string {
+  const html = bounded(source);
   let out = '';
   let pos = 0;
   // Пока дальше есть «-->», комментарий вырезается целиком: в нём бывает «>»,
@@ -150,9 +163,13 @@ function* elements(xml: string, name: string): Generator<XmlElement & { selfClos
   }
 }
 
-/** Текст как содержимое элемента: `&`, `<` и `>` — сущностями. */
+/**
+ * Текст как содержимое элемента: `&`, `<` и `>` — сущностями. Через split и
+ * join: на миллионах совпадений это втрое быстрее replace и replaceAll
+ * (замер 08.11.2026, Node 22: 8 млн «<» — 350 мс против 1100–2300 мс).
+ */
 function escapeText(text: string): string {
-  return text.replace(/[&<>]/g, (ch) => (ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : '&gt;'));
+  return text.split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;');
 }
 
 /**
@@ -173,12 +190,19 @@ export function normalizeXml(xml: string): string {
   for (;;) {
     if (cdata !== -1 && (comment === -1 || cdata < comment)) {
       const end = xml.indexOf(']]>', cdata + 9);
-      if (end === -1) break;
+      // Дальше нет ни одного «]]>»: и этот, и следующие «<![CDATA[» — просто текст.
+      if (end === -1) {
+        cdata = -1;
+        continue;
+      }
       out += xml.slice(pos, cdata) + escapeText(xml.slice(cdata + 9, end));
       pos = end + 3;
     } else if (comment !== -1) {
       const end = xml.indexOf('-->', comment + 4);
-      if (end === -1) break;
+      if (end === -1) {
+        comment = -1;
+        continue;
+      }
       out += xml.slice(pos, comment);
       pos = end + 3;
     } else {
@@ -261,7 +285,8 @@ function parseAttributes(text: string): Record<string, string> {
     if (quote !== '"' && quote !== "'") continue;
     const end = text.indexOf(quote, i + 1);
     if (end === -1) break;
-    if (name !== '') attrs[name] = decodeEntities(text.slice(i + 1, end));
+    // Длинное значение отбрасывается, а не обрезается: обрезанное было бы другим значением.
+    if (name !== '' && end - i - 1 <= MAX_ELEMENT_SOURCE) attrs[name] = decodeEntities(text.slice(i + 1, end));
     i = end + 1;
   }
   return attrs;

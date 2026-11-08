@@ -4,14 +4,14 @@ import { describe, it } from 'node:test';
 import { parseConfig } from '../src/config.ts';
 import { ALL_SECRETS, SOURCE_SECRETS } from '../src/env.ts';
 import { SourceError } from '../src/errors.ts';
-import { failureHint, formatDuration, formatFailureAlert, markAlertSent, recordFailure, recordSuccess } from '../src/health.ts';
+import { failureHint, formatDuration, formatFailureAlert, markAlertSent, markRecoverySent, recordFailure, recordSuccess } from '../src/health.ts';
 import { readText, type FetchLike } from '../src/http.ts';
 import { classifyBlueskyError, fetchBlueskyPosts, type BlueskySource } from '../src/sources/bluesky.ts';
 import { feedUrl, fetchFeedPosts, parseFeed, type FeedSource } from '../src/sources/feed.ts';
 import { allAdapters, findAdapter, probeFetchLimit, probeSourcePosts, SOURCE_TYPES, type SourceContext } from '../src/sources/index.ts';
 import { fetchXPosts, newestId, type XSource } from '../src/sources/x.ts';
 import { MAX_STORED_TEXT } from '../src/sources/parse.ts';
-import { decodeEntities, htmlToText } from '../src/sources/xml.ts';
+import { decodeEntities, htmlToText, MAX_ELEMENT_SOURCE, tagAttributes, textContent } from '../src/sources/xml.ts';
 import { fetchYoutubePosts, type YoutubeSource } from '../src/sources/youtube.ts';
 import { runRadar } from '../src/radar.ts';
 import { emptyState, newSourceState, parseState } from '../src/state.ts';
@@ -274,11 +274,19 @@ describe('RSS и Atom', () => {
       `<rss><channel>${'<![CDATA[a]]>'.repeat(100_000)}<!-- x --></channel></rss>`,
       `<feed><entry><id>a</id>${'<source>'.repeat(100_000)}</entry></feed>`,
       `<rss><channel>${'<!--x-->'.repeat(100_000)}<![CDATA[</channel></rss>`,
+      // Раскрытие миллионов сущностей из CDATA роняло процесс по памяти.
+      item(`<title><![CDATA[${'&'.repeat(1_000_000)}]]></title>`),
+      item(`<description><![CDATA[${'<'.repeat(1_000_000)}]]></description>`),
     ];
     const started = performance.now();
-    // Повторный поиск «>» после каждого «<» тоже квадратичен, просто быстр: ловится только объёмом.
-    assert.equal(htmlToText('<'.repeat(1_500_000)).length, 1_500_000);
-    assert.equal(htmlToText(`a${'<!--<b>'.repeat(60_000)}`), 'a');
+    // Повторный поиск «>» после каждого «<» тоже квадратичен, просто быстр: под пределом
+    // элемента это ~150 мс на вызов против долей миллисекунды, поэтому порог свой.
+    const lts = '<'.repeat(MAX_ELEMENT_SOURCE);
+    for (let i = 0; i < 10; i += 1) assert.equal(htmlToText(lts).length, MAX_ELEMENT_SOURCE);
+    const comments = `a${'<!--<b>'.repeat(14_000)}`; // под пределом MAX_ELEMENT_SOURCE
+    for (let i = 0; i < 20; i += 1) assert.equal(htmlToText(comments), 'a');
+    const htmlElapsed = performance.now() - started;
+    assert.ok(htmlElapsed < 750, `htmlToText занял ${Math.round(htmlElapsed)} мс`);
     for (const xml of hostile) {
       try {
         parseFeed(FEED, xml, 10);
@@ -495,6 +503,16 @@ describe('RSS и Atom', () => {
     assert.throws(() => parseFeed(FEED, item('not-a-url'), 10), (e) => e instanceof SourceError && e.kind === 'bad_response');
   });
 
+  it('длина ссылки сверяется до разбора: punycode-хост в сотни килобайт не останавливает опрос', () => {
+    // Ссылки из JSON-ответов ограничены только размером тела, а разбор
+    // punycode в new URL квадратичен: 600 000 символов — около 2 с.
+    const huge = `https://xn--${'a'.repeat(300_000)}-${'b9'.repeat(150_000)}.com/`;
+    const started = performance.now();
+    assert.equal(httpUrl(huge), undefined);
+    const elapsed = performance.now() - started;
+    assert.ok(elapsed < 250, `проверка заняла ${Math.round(elapsed)} мс`);
+  });
+
   it('кодировка ответа: метка BOM, объявление <?xml encoding>, затем charset заголовка, иначе UTF-8', async () => {
     const ascii = (str: string) => Uint8Array.from(str, (c) => c.charCodeAt(0));
     const join = (...parts: Uint8Array[]) => Uint8Array.from(parts.flatMap((part) => [...part]));
@@ -526,6 +544,79 @@ describe('RSS и Atom', () => {
     await run(NOW + 10 * MINUTE);
     assert.equal(state.sources.blog?.consecutiveFailures, 1, 'свежая битая запись — сбой');
     assert.equal(state.sources.blog?.lastError?.kind, 'bad_response');
+  });
+
+  it('текст элемента разбирается не дальше MAX_ELEMENT_SOURCE; длинное значение атрибута отбрасывается', () => {
+    assert.equal(textContent('a'.repeat(MAX_ELEMENT_SOURCE + 10)).length, MAX_ELEMENT_SOURCE);
+    assert.equal(htmlToText('б'.repeat(MAX_ELEMENT_SOURCE + 10)).length, MAX_ELEMENT_SOURCE);
+    const value = (n: number) => `https://e.com/${'a'.repeat(n - 14)}`;
+    assert.equal(tagAttributes(`<link href="${value(MAX_ELEMENT_SOURCE)}"/>`, 'link')[0]?.href?.length, MAX_ELEMENT_SOURCE);
+    assert.equal(tagAttributes(`<link href="${value(MAX_ELEMENT_SOURCE + 1)}"/>`, 'link')[0]?.href, undefined);
+  });
+
+  it('текст до закрытого комментария HTML сохраняется', () => {
+    assert.equal(htmlToText('до <!-- x --> после'), 'до  после');
+  });
+
+  it('незакрытая секция одного вида не отключает другую', () => {
+    const good = (i: number) =>
+      `<item><guid>g${i}</guid><link>https://e.com/${i}</link><pubDate>Mon, 19 Oct 2026 0${i}:00:00 +0000</pubDate><title>Пост ${i}</title></item>`;
+    const spoof = `<item><guid>s</guid><description><![CDATA[<title >Подмена</title >]]></description><title>Настоящий</title>
+      <link>https://e.com/s</link><pubDate>Mon, 19 Oct 2026 05:00:00 +0000</pubDate></item>`;
+    const afterComment = parseFeed(FEED, `<rss><channel><title>Блог <!-- черновик</title>${spoof}</channel></rss>`, 10);
+    assert.deepEqual(afterComment.posts.map((p) => p.text), ['Настоящий'], 'CDATA после незакрытого «<!--» — текст');
+    const draft = `<!-- ${good(9)} -->`;
+    const afterCdata = parseFeed(FEED, `<rss><channel><title>Блог <![CDATA[ без конца</title>${good(1)}${draft}</channel></rss>`, 10);
+    assert.deepEqual(afterCdata.posts.map((p) => p.id), ['g1'], 'комментарий после незакрытого «<![CDATA[» вырезается');
+  });
+
+  it('направление ленты — по большинству соседних записей: закреплённая старая запись его не переворачивает', () => {
+    const at = (id: string, hoursAgo: number) =>
+      `<item><guid>${id}</guid><link>https://e.com/${id}</link><pubDate>${new Date(NOW - hoursAgo * HOUR).toUTCString()}</pubDate></item>`;
+    const undated = '<item><guid>u</guid><link>https://e.com/u</link></item>';
+    const feed = (...items: string[]) => `<rss><channel>${items.join('')}</channel></rss>`;
+    const pinned = at('pinned', 50_000);
+    assert.equal(parseFeed(FEED, feed(pinned, undated, at('a', 1), at('b', 2), at('c', 3)), 2).skipped, 1, 'от новых к старым с закреплённой — без даты в голове считается');
+    // От старых к новым, limit 2: свежий край — последние две позиции из пяти.
+    assert.equal(parseFeed(FEED, feed(at('e', 5), at('d', 4), at('c', 3), undated, at('a', 1)), 2).skipped, 1, 'позиция length − limit — среди свежих');
+    assert.equal(parseFeed(FEED, feed(at('e', 5), at('d', 4), undated, at('c', 3), at('a', 1)), 2).skipped, 0, 'позиция раньше — среди старых');
+    assert.equal(parseFeed(FEED, feed(undated, at('b', 2), at('a', 1), at('c', 3)), 2).skipped, 1, 'поровну — как обычная лента, от новых к старым');
+  });
+
+  it('BOM UTF-16 — кодировка документа; объявление UTF-16 без BOM — UTF-8', async () => {
+    const read = async (bytes: Uint8Array<ArrayBuffer>) => (await readText(async () => new Response(bytes), 'https://e.com/')).text;
+    const le = Uint8Array.from(Buffer.from('﻿Привет', 'utf16le'));
+    const be = Uint8Array.from(Buffer.from('﻿Привет', 'utf16le').swap16());
+    assert.equal(await read(le), 'Привет');
+    assert.equal(await read(be), 'Привет');
+    const decl = '<?xml version="1.0" encoding="UTF-16"?><rss/>';
+    assert.equal(await read(new TextEncoder().encode(decl)), decl);
+  });
+
+  it('«снова читаются» доставлено — обещание частичного алерта снято, полный сбой ждёт суток', async () => {
+    const good = (i: number) =>
+      `<item><guid>g${i}</guid><link>https://e.com/${i}</link><pubDate>${new Date(NOW - i * HOUR).toUTCString()}</pubDate><title>Пост ${i}</title></item>`;
+    const partly = `<rss><channel>${good(1)}<item><guid>b</guid><pubDate>${new Date(NOW + MINUTE).toUTCString()}</pubDate></item></channel></rss>`;
+    let reply = (): Response => text(partly);
+    const alerts: string[] = [];
+    const fetch: FetchLike = async (input, init) => {
+      if (new URL(input).hostname !== 'api.telegram.org') return reply();
+      const body = JSON.parse(String(init?.body)) as { chat_id: string; text: string };
+      if (body.chat_id === SECRETS.TELEGRAM_ALERT_CHAT_ID) alerts.push(body.text.split('\n')[0] ?? '');
+      return json({ ok: true, result: {} });
+    };
+    const config = testConfig({ fetchLimit: 20, sources: [{ id: 'blog', type: 'feed', label: 'Блог', url: 'https://e.com/feed' }] });
+    const state = emptyState();
+    state.sources.blog = { ...newSourceState(NOW - 10 * HOUR), bootstrapped: true };
+    const run = (at: number) => runRadar(state, { config, secrets: SECRETS, fetch, now: () => at, log: () => {}, redact: (t) => t, sleep: async () => {} });
+    await run(NOW + 10 * MINUTE);
+    await run(NOW + 20 * MINUTE);
+    reply = () => text(`<rss><channel>${good(1)}</channel></rss>`);
+    await run(NOW + 30 * MINUTE);
+    reply = () => text('Internal Server Error', 500);
+    await run(NOW + 40 * MINUTE);
+    await run(NOW + 50 * MINUTE);
+    assert.deepEqual(alerts, ['<b>Блог</b>: часть постов не читается, уже 10 мин.', '<b>Блог</b>: посты снова читаются.']);
   });
 
   it('после алерта о частичном сбое полный сбой даёт новый алерт сразу', async () => {
@@ -861,7 +952,7 @@ describe('алерты для людей', () => {
     assert.throws(() => parseState(withSource({ alertedPartial: 'да' })), /источник vk/);
   });
 
-  it('частичный алерт и полный: полный — сразу, дальше снова раз в сутки; успех закрывает обещание', () => {
+  it('частичный алерт и полный: полный — сразу, дальше снова раз в сутки; обещание снимает доставленное «снова читаются»', () => {
     const state = newSourceState(NOW - HOUR);
     const partial = new SourceError('bad_response', 'не разобрано элементов ответа: 1 из 3');
     const down = new SourceError('http', 'лента ответила HTTP 500');
@@ -875,7 +966,12 @@ describe('алерты для людей', () => {
     markAlertSent(state, NOW + 50 * MINUTE, true);
     recordSuccess(state);
     recordFailure(state, down, NOW + 60 * MINUTE);
-    assert.equal(recordFailure(state, down, NOW + 70 * MINUTE), false, 'после «снова читаются» обещания нет');
+    assert.equal(recordFailure(state, down, NOW + 70 * MINUTE), true, '«снова читаются» не дошло — обещание в силе');
+    markAlertSent(state, NOW + 70 * MINUTE, true);
+    recordSuccess(state);
+    markRecoverySent(state);
+    recordFailure(state, down, NOW + 80 * MINUTE);
+    assert.equal(recordFailure(state, down, NOW + 90 * MINUTE), false, 'после доставленного «снова читаются» обещания нет');
   });
 
   it('давность сбоя по-русски', () => {

@@ -99,7 +99,10 @@ export function decoderFor(contentType: string | null, bytes: Uint8Array): TextD
   if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder('utf-16be');
   // Объявление — ASCII в первых байтах при любой однобайтовой кодировке.
   const head = String.fromCharCode(...bytes.subarray(0, 256));
-  const label = XML_ENCODING.exec(head)?.[1] ?? HEADER_CHARSET.exec(contentType ?? '')?.[1];
+  const declared = XML_ENCODING.exec(head)?.[1];
+  // Объявление прочиталось побайтово, значит, документ не в UTF-16: без BOM
+  // такая метка врёт, и браузеры читают его как UTF-8.
+  const label = declared !== undefined && /^utf-?16/i.test(declared) ? 'utf-8' : (declared ?? HEADER_CHARSET.exec(contentType ?? '')?.[1]);
   if (label !== undefined) {
     try {
       return new TextDecoder(label);

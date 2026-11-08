@@ -60,9 +60,17 @@ export function recordSuccess(state: SourceState): boolean {
   state.consecutiveFailures = 0;
   delete state.failingSince;
   delete state.lastError;
-  // Обещание частичного алерта закрывает «снова читаются», а не следующий сбой.
-  delete state.alertedPartial;
   return state.alertOpen === true;
+}
+
+/**
+ * «Снова читаются» доставлено: алерт закрыт, и обещание частичного алерта
+ * («разобранные посты приходят») — тоже. Не при успехе: если уведомление не
+ * дошло, последним человек видел обещание, и полный сбой должен его опровергнуть.
+ */
+export function markRecoverySent(state: SourceState): void {
+  delete state.alertOpen;
+  delete state.alertedPartial;
 }
 
 /** Секреты источника в тексте: `VK_TOKEN`, `A и B`; пустая строка — сеть без ключа. */

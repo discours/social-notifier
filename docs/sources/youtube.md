@@ -18,11 +18,11 @@
    gh secret set YOUTUBE_API_KEY --repo OWNER/REPO
    ```
 
-То же из командной строки, если стоит [gcloud](https://cloud.google.com/sdk/docs/install). Ключ уходит из Google Cloud прямо в секрет и не появляется на экране:
+То же из командной строки, если стоит [gcloud](https://cloud.google.com/sdk/docs/install). Ключ уходит из Google Cloud прямо в секрет и не появляется на экране. Флаг `--async` у `create` обязателен: без него gcloud печатает ответ целиком, вместе с самим ключом.
 
 ```bash
 gcloud services enable youtube.googleapis.com --project PROJECT
-gcloud services api-keys create --project PROJECT --display-name="social-notifier YouTube" --api-target=service=youtube.googleapis.com
+gcloud services api-keys create --async --project PROJECT --display-name="social-notifier YouTube" --api-target=service=youtube.googleapis.com
 gcloud services api-keys list --project PROJECT --format="value(displayName,name.basename())"
 gcloud services api-keys get-key-string KEY_ID --project PROJECT --format="value(keyString)" | gh secret set YOUTUBE_API_KEY --repo OWNER/REPO
 ```
