@@ -2,7 +2,7 @@
   "messageTitle": "Новые посты Дискурса, поддержим лайком и репостом:",
   "groupWindowMinutes": 10,
   "maxPostAgeHours": 48,
-  "fetchLimit": 10,
+  "fetchLimit": 25,
   "graphApiVersion": "v25.0",
   "vkApiVersion": "5.199",
   "sources": [
