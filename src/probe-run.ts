@@ -8,10 +8,11 @@
  * видит токен Meta; ID чатов — никогда.
  */
 import type { Secrets } from './env.ts';
-import { toSourceError } from './errors.ts';
+import { SourceError, toSourceError } from './errors.ts';
 import { escapeHtml, formatDigest, TELEGRAM_TEXT_LIMIT } from './format.ts';
 import type { FetchLike } from './http.ts';
 import { describe, type Texts } from './i18n/index.ts';
+import type { SourceContext } from './sources/adapter.ts';
 import { probeSourcePosts } from './sources/index.ts';
 import { graphGet } from './sources/meta.ts';
 import { checkChatAccess, findRecentChats, getBotIdentity, resolveChatId, sendTelegramMessage, TelegramError } from './telegram.ts';
@@ -32,6 +33,9 @@ export interface ProbeDeps {
   /** Только поиск чатов: ответить в каждый найденный чат его ID. */
   findChats?: boolean;
 }
+
+/** Больше запросов к `me/accounts` проба не делает: при 25 страницах на ответ это 250 страниц. */
+export const MAX_META_PAGE_REQUESTS = 10;
 
 /** Код выхода пробы: 0 — всё в порядке, 1 — есть проблемы. */
 export async function runProbe(deps: ProbeDeps): Promise<0 | 1> {
@@ -76,19 +80,7 @@ async function probeAccess(deps: ProbeDeps, config: RadarConfig): Promise<0 | 1>
       // Только id: лог публичный, а при личном токене имя — это имя человека.
       const me = await graphGet(ctx, 'me', { fields: 'id' });
       log(t.probe.metaOwner(asString(me.id) ?? '?'));
-      // Поля перечислены явно: без них ответ содержал бы токены страниц.
-      const pages = await graphGet(ctx, 'me/accounts', {
-        fields: 'id,name,instagram_business_account{id,username}',
-        limit: '25',
-      });
-      const data = Array.isArray(pages.data) ? pages.data : [];
-      if (data.length === 0) log(t.probe.metaNoPages);
-      for (const page of data) {
-        if (!isRecord(page)) continue;
-        const ig = isRecord(page.instagram_business_account) ? page.instagram_business_account : undefined;
-        const igText = ig ? `@${asString(ig.username) ?? '?'} (${asString(ig.id) ?? '?'})` : undefined;
-        log(t.probe.metaPage(asString(page.name) ?? '?', asString(page.id) ?? '?', igText));
-      }
+      failed += await probeMetaPages(deps, ctx);
     } catch (err) {
       failed += 1;
       const e = toSourceError(err, redact);
@@ -107,6 +99,60 @@ async function probeAccess(deps: ProbeDeps, config: RadarConfig): Promise<0 | 1>
 
   log(t.probe.result(failed));
   return failed === 0 ? 0 : 1;
+}
+
+/**
+ * Все страницы, которые видит токен Meta, — по курсору `paging.cursors.after`,
+ * не больше MAX_META_PAGE_REQUESTS запросов. Адрес из `paging.next` не
+ * используется: запрос с токеном уходит только на GRAPH_ORIGIN и всегда с
+ * `fields` — без них ответ `me/accounts` содержит токены страниц. Ответ без
+ * списка страниц или без курсора к следующей — bad_response (исключение), а не
+ * «страниц не видно». Возвращает число проблем: неразобранные элементы и
+ * усечение на пределе.
+ */
+async function probeMetaPages(deps: ProbeDeps, ctx: SourceContext): Promise<number> {
+  const { t, log } = deps;
+  let shown = 0;
+  let unparsed = 0;
+  let truncated = true;
+  let after: string | undefined;
+  for (let request = 0; request < MAX_META_PAGE_REQUESTS; request += 1) {
+    const body = await graphGet(ctx, 'me/accounts', {
+      fields: 'id,name,instagram_business_account{id,username}',
+      limit: '25',
+      ...(after === undefined ? {} : { after }),
+    });
+    if (!Array.isArray(body.data)) throw new SourceError('bad_response', (tt) => tt.errors.metaNoPageList);
+    for (const page of body.data) {
+      if (!isRecord(page)) {
+        unparsed += 1;
+        continue;
+      }
+      const ig = isRecord(page.instagram_business_account) ? page.instagram_business_account : undefined;
+      const igText = ig ? `@${asString(ig.username) ?? '?'} (${asString(ig.id) ?? '?'})` : undefined;
+      log(t.probe.metaPage(asString(page.name) ?? '?', asString(page.id) ?? '?', igText));
+      shown += 1;
+    }
+    // Последняя страница — без next; cursors Graph отдаёт и на ней.
+    const paging = isRecord(body.paging) ? body.paging : undefined;
+    if (paging?.next === undefined || paging.next === null) {
+      truncated = false;
+      break;
+    }
+    after = asString(isRecord(paging.cursors) ? paging.cursors.after : undefined);
+    if (!after) throw new SourceError('bad_response', (tt) => tt.errors.graphNoNextCursor);
+  }
+  if (shown + unparsed === 0) log(t.probe.metaNoPages);
+  let failed = 0;
+  if (unparsed > 0) {
+    failed += 1;
+    log(t.probe.error('Meta', 'bad_response', undefined, t.errors.partlyParsed(unparsed, shown + unparsed)));
+  }
+  if (truncated) {
+    failed += 1;
+    log(t.probe.metaPagesTruncated(shown, MAX_META_PAGE_REQUESTS));
+  }
+  return failed;
 }
 
 /** Бот и оба чата; с `sendTest` — тестовое сообщение. Возвращает число проблем. */

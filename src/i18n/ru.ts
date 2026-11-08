@@ -81,6 +81,8 @@ export const ru: Texts = {
     noPostList: (network) => `в ответе ${network} нет списка постов`,
     blueskyNoFeed: 'в ответе Bluesky нет ленты',
     instagramNoMedia: 'в ответе Instagram нет списка публикаций',
+    metaNoPageList: 'в ответе Graph API нет списка страниц',
+    graphNoNextCursor: 'ответ Graph API ссылается на следующую страницу, но не даёт к ней курсора',
     instagramNotLinked: 'к странице не привязан профессиональный аккаунт Instagram или у токена нет права instagram_basic',
     instagramIdNotNumber: 'ID аккаунта Instagram не число',
     facebookNoPageToken: (pageId) => `Graph API не выдал токен страницы ${pageId}: страница не назначена владельцу META_TOKEN`,
@@ -171,6 +173,8 @@ export const ru: Texts = {
     metaOwner: (id) => `владелец токена: id ${id}`,
     metaNoPages: 'страниц не видно: проверьте, что системному пользователю выдан доступ к странице',
     metaPage: (name, pageId, instagram) => `страница «${name}» pageId=${pageId}, Instagram: ${instagram ?? 'не привязан'}`,
+    metaPagesTruncated: (shown, requests) =>
+      `список страниц неполный: проба останавливается после ${requests} запросов; выше показано страниц: ${shown}, а токен видит больше`,
     telegramSection: '== Telegram ==',
     botTokenMissing: 'не задан секрет TELEGRAM_BOT_TOKEN',
     bot: (username) => `бот: @${username}`,

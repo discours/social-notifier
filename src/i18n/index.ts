@@ -95,6 +95,10 @@ export interface Texts {
     readonly instagramNotLinked: string;
     readonly instagramIdNotNumber: string;
     facebookNoPageToken(pageId: string): string;
+    /** Ответ `me/accounts` без списка страниц (проба). */
+    readonly metaNoPageList: string;
+    /** Graph API ссылается на следующую страницу, но курсора к ней не дал. */
+    readonly graphNoNextCursor: string;
     readonly youtubeNoVideos: string;
     readonly youtubeChannelNotFound: string;
     readonly youtubeNoUploads: string;
@@ -184,6 +188,8 @@ export interface Texts {
     metaOwner(id: string): string;
     readonly metaNoPages: string;
     metaPage(name: string, pageId: string, instagram: string | undefined): string;
+    /** Проба дошла до предела запросов, а Graph API ещё ссылается на следующую страницу. */
+    metaPagesTruncated(shown: number, requests: number): string;
     readonly telegramSection: string;
     readonly botTokenMissing: string;
     bot(username: string): string;

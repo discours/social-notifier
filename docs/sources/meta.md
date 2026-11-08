@@ -28,7 +28,7 @@ The menu names below are from the English interface: it changes less often than 
    gh secret set META_TOKEN --repo OWNER/REPO
    ```
 
-5. Run the probe ([setup.md](../setup.md#3-access-probe)). It prints the IDs of all pages the token sees and the Instagram accounts linked to them.
+5. Run the probe ([setup.md](../setup.md#3-access-probe)). It prints the IDs of all pages the token sees and the Instagram accounts linked to them. The probe reads up to 250 pages; if the token sees more, it says the list is incomplete and ends with code 1.
 
 ## Sources in the config
 
