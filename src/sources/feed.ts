@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { SourceError } from '../errors.ts';
 import { readText } from '../http.ts';
 import type { ParsedPosts, Post } from '../types.ts';
-import { httpUrl, isPlausibleTime } from '../util.ts';
+import { httpUrl, isPlausibleTime, MAX_URL_LENGTH } from '../util.ts';
 import type { SourceAdapter, SourceBase, SourceContext } from './adapter.ts';
 import { collectPosts } from './parse.ts';
 import {
@@ -10,10 +10,10 @@ import {
   childElement,
   childText,
   htmlToText,
+  normalizeXml,
   plainText,
   removeElements,
   rootElement,
-  stripComments,
   tagAttributes,
   textContent,
   type XmlElement,
@@ -31,7 +31,6 @@ export interface FeedSource extends SourceBase {
 
 /** ID записи длиннее этого заменяется хэшем: он хранится в состоянии и пишется в лог. */
 const MAX_ID_LENGTH = 200;
-const MAX_URL_LENGTH = 2048;
 
 export const feedAdapter: SourceAdapter<FeedSource> = {
   type: 'feed',
@@ -90,7 +89,7 @@ interface Entry {
  * бы из памяти уже отправленные посты, и те пришли бы снова.
  */
 export function parseFeed(source: SourceBase, xml: string, limit: number, notBefore = -Infinity): ParsedPosts {
-  const doc = stripComments(xml);
+  const doc = normalizeXml(xml);
   const root = rootElement(doc);
   const isAtom = root === 'feed';
   if (!isAtom && root !== 'rss' && root !== 'rdf:RDF') throw new SourceError('bad_response', 'по адресу ленты не RSS и не Atom');
@@ -105,12 +104,22 @@ export function parseFeed(source: SourceBase, xml: string, limit: number, notBef
   const newest = posts.sort((a, b) => b.publishedAt - a.publishedAt).slice(0, limit);
   // Неразобранная запись — сбой, только если из-за неё мог потеряться пост:
   // она не старше `notBefore` и попала бы в `limit` свежих. Запись без даты —
-  // если стоит среди первых `limit` записей: ленты идут от новых к старым.
+  // если стоит среди `limit` записей со стороны новых: обычно это начало
+  // ленты, но бывают ленты от старых к новым, и тогда это конец.
   // Иначе одна старая битая запись давала бы алерт раз в сутки, пока она в ленте.
   const oldestKept = newest.length === limit ? (newest.at(-1)?.publishedAt ?? -Infinity) : -Infinity;
   const threshold = Math.max(oldestKept, notBefore);
-  const skipped = entries.filter((e, i) => !e.post && (e.publishedAt === undefined ? i < limit : e.publishedAt >= threshold)).length;
+  const newestAtEnd = isOldestFirst(entries);
+  const amongNewest = (i: number) => (newestAtEnd ? i >= entries.length - limit : i < limit);
+  const skipped = entries.filter((e, i) => !e.post && (e.publishedAt === undefined ? amongNewest(i) : e.publishedAt >= threshold)).length;
   return { posts: newest, skipped };
+}
+
+/** Лента идёт от старых к новым: первая запись с датой старше последней. */
+function isOldestFirst(entries: readonly Entry[]): boolean {
+  const first = entries.find((e) => e.publishedAt !== undefined)?.publishedAt;
+  const last = entries.findLast((e) => e.publishedAt !== undefined)?.publishedAt;
+  return first !== undefined && last !== undefined && first < last;
 }
 
 const PREFIXED_ENTRY = /<[A-Za-z_][\w.-]*:(?:item|entry)[\s>/]/;

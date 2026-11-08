@@ -63,19 +63,51 @@ export async function readText(
 async function readBody(res: Response, maxBytes: number): Promise<string> {
   if (!res.body) return '';
   const reader = res.body.getReader();
-  const decoder = new TextDecoder();
+  const chunks: Uint8Array[] = [];
   let size = 0;
-  let text = '';
   for (;;) {
     const { done, value } = await reader.read();
-    if (done) return text + decoder.decode();
+    if (done) break;
     size += value.byteLength;
     if (size > maxBytes) {
       await reader.cancel().catch(() => undefined);
       throw new SourceError('bad_response', `ответ больше ${maxBytes / 1024 / 1024} МБ, дальше не читается`);
     }
-    text += decoder.decode(value, { stream: true });
+    chunks.push(value);
   }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return decoderFor(res.headers.get('content-type'), bytes).decode(bytes);
+}
+
+const XML_ENCODING = /^<\?xml\s[^>]*?encoding\s*=\s*["']([\w.:-]{1,40})["']/;
+const HEADER_CHARSET = /;\s*charset\s*=\s*"?([\w.:-]{1,40})/i;
+
+/**
+ * Кодировка ответа: метка порядка байтов, затем объявление `<?xml … encoding>`
+ * в начале документа, затем charset из Content-Type, иначе UTF-8. Объявление
+ * важнее заголовка: его пишет автор ленты, а заголовок — настройка сервера,
+ * которая чаще врёт. Без этого лента в windows-1251 пришла бы знаками «�».
+ */
+export function decoderFor(contentType: string | null, bytes: Uint8Array): TextDecoder {
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return new TextDecoder('utf-8');
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le');
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder('utf-16be');
+  // Объявление — ASCII в первых байтах при любой однобайтовой кодировке.
+  const head = String.fromCharCode(...bytes.subarray(0, 256));
+  const label = XML_ENCODING.exec(head)?.[1] ?? HEADER_CHARSET.exec(contentType ?? '')?.[1];
+  if (label !== undefined) {
+    try {
+      return new TextDecoder(label);
+    } catch {
+      // Неизвестная метка: UTF-8 верен для большинства лент.
+    }
+  }
+  return new TextDecoder('utf-8');
 }
 
 function describeNetworkError(err: unknown): string {

@@ -13,21 +13,29 @@ export const ALERT_AFTER_FAILURES = 2;
  */
 export const REALERT_AFTER_MS = 24 * 60 * 60 * 1000;
 
-/** Отмечает неудачу. Возвращает true, если пора слать алерт. */
-export function recordFailure(state: SourceState, err: SourceError, now: number): boolean {
+/**
+ * Отмечает неудачу. Возвращает true, если пора слать алерт. `partial` —
+ * ответ разобрался не целиком, и разобранные посты идут дальше.
+ */
+export function recordFailure(state: SourceState, err: SourceError, now: number, partial = false): boolean {
   // Начало серии известно, только если серия началась при этой версии: у
   // сбоя, тянущегося с прошлой версии, поля нет, и алерт считает запуски.
   if (state.consecutiveFailures === 0) state.failingSince = now;
   state.consecutiveFailures += 1;
   state.lastError = { kind: err.kind, message: err.message, at: now, ...(err.code ? { code: err.code } : {}) };
   if (state.consecutiveFailures < ALERT_AFTER_FAILURES) return false;
+  // Алерт о частичном сбое обещал, что разобранные посты приходят. Если
+  // источник лёг целиком, обещание ложно: новый алерт — сразу, а не через сутки.
+  if (state.alertedPartial === true && !partial) return true;
   return state.alertedAt === undefined || now - state.alertedAt >= REALERT_AFTER_MS;
 }
 
 /** Алерт доставлен: отсчёт суток до следующего и ожидание уведомления о починке. */
-export function markAlertSent(state: SourceState, now: number): void {
+export function markAlertSent(state: SourceState, now: number, partial = false): void {
   state.alertedAt = now;
   state.alertOpen = true;
+  if (partial) state.alertedPartial = true;
+  else delete state.alertedPartial;
 }
 
 /**
@@ -52,6 +60,8 @@ export function recordSuccess(state: SourceState): boolean {
   state.consecutiveFailures = 0;
   delete state.failingSince;
   delete state.lastError;
+  // Обещание частичного алерта закрывает «снова читаются», а не следующий сбой.
+  delete state.alertedPartial;
   return state.alertOpen === true;
 }
 

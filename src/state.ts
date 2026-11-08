@@ -28,6 +28,8 @@ export interface SourceState {
   alertedAt?: number;
   /** Алерт доставлен, а «снова отвечает» — ещё нет. */
   alertOpen?: true;
+  /** Последний алерт был о частичном сбое: если источник ляжет целиком, алерт повторится сразу. */
+  alertedPartial?: true;
   /** Когда запуск последний раз покраснел из-за алерта по этому источнику. */
   alertRedAt?: number;
 }
@@ -117,6 +119,7 @@ export function parseState(text: string): RadarState {
       !isOptionalTime(source.alertedAt) ||
       !isOptionalTime(source.alertRedAt) ||
       !(source.alertOpen === undefined || source.alertOpen === true) ||
+      !(source.alertedPartial === undefined || source.alertedPartial === true) ||
       !(source.lastError === undefined || isRecord(source.lastError))
     ) {
       throw new Error(`файл состояния повреждён: источник ${id}`);

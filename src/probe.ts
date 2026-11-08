@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util';
 import { loadConfig } from './config.ts';
 import { readSecrets, secretValues } from './env.ts';
 import { toSourceError } from './errors.ts';
-import { adapterFor, fetchSourcePosts } from './sources/index.ts';
+import { probeSourcePosts } from './sources/index.ts';
 import { graphGet } from './sources/meta.ts';
 import { checkChatAccess, getBotIdentity, sendTelegramMessage } from './telegram.ts';
 import { asString, isRecord, makeRedactor } from './util.ts';
@@ -33,11 +33,7 @@ async function main(): Promise<number> {
   log('== Источники ==');
   for (const source of config.sources) {
     try {
-      // Проба читает столько же, сколько радар, и видит те же неразобранные
-      // записи; платная сеть — меньше, потому что каждый пост стоит денег.
-      const { probeLimit } = adapterFor(source);
-      const fetchLimit = probeLimit === undefined ? config.fetchLimit : Math.min(config.fetchLimit, probeLimit);
-      const { posts, skipped } = await fetchSourcePosts(source, { ...ctx, config: { ...config, fetchLimit } });
+      const { posts, skipped } = await probeSourcePosts(source, ctx);
       const latest = posts.reduce<(typeof posts)[number] | undefined>(
         (best, p) => (best === undefined || p.publishedAt > best.publishedAt ? p : best),
         undefined,

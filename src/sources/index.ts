@@ -1,5 +1,5 @@
 import type { ParsedPosts } from '../types.ts';
-import type { SourceAdapter, SourceContext } from './adapter.ts';
+import type { SourceAdapter, SourceContext, SourceSettings } from './adapter.ts';
 import { blueskyAdapter, type BlueskySource } from './bluesky.ts';
 import { facebookAdapter, type FacebookSource } from './facebook.ts';
 import { feedAdapter, type FeedSource } from './feed.ts';
@@ -54,7 +54,22 @@ export function allAdapters(): SourceAdapter<SourceConfig>[] {
   return Object.values(ADAPTERS) as unknown as SourceAdapter<SourceConfig>[];
 }
 
+/**
+ * Сколько постов читает проба. Столько же, сколько радар, чтобы проба видела
+ * те же неразобранные записи; у платной сети — не больше её `probeLimit`,
+ * потому что каждый прочитанный пост стоит денег.
+ */
+export function probeFetchLimit(source: SourceConfig, config: SourceSettings): number {
+  const { probeLimit } = adapterFor(source);
+  return probeLimit === undefined ? config.fetchLimit : Math.min(config.fetchLimit, probeLimit);
+}
+
 /** Последние посты источника. */
 export function fetchSourcePosts(source: SourceConfig, ctx: SourceContext): Promise<ParsedPosts> {
   return adapterFor(source).fetch(source, ctx);
+}
+
+/** Посты источника для пробы: не больше `probeFetchLimit`. */
+export function probeSourcePosts(source: SourceConfig, ctx: SourceContext): Promise<ParsedPosts> {
+  return fetchSourcePosts(source, { ...ctx, config: { ...ctx.config, fetchLimit: probeFetchLimit(source, ctx.config) } });
 }

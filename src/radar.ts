@@ -66,8 +66,10 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
 
   for (const source of config.sources) {
     const sourceState = sourceStateOf(state, source.id, now);
+    // Пост старше порога или вышедший до начала наблюдения в очередь не попадёт.
+    const cutoff = now - config.maxPostAgeHours * HOUR;
     const fail = (error: SourceError, partial = false): void => {
-      const shouldAlert = recordFailure(sourceState, error, now);
+      const shouldAlert = recordFailure(sourceState, error, now, partial);
       log(
         `${source.id}: ошибка ${error.kind}${error.code ? ` (${error.code})` : ''}: ${error.message}; ` +
           `подряд ${sourceState.consecutiveFailures}`,
@@ -82,7 +84,7 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
             partial,
             ...(deps.runUrl ? { runUrl: deps.runUrl } : {}),
           }),
-          onSent: () => markAlertSent(sourceState, now),
+          onSent: () => markAlertSent(sourceState, now, partial),
         });
       }
     };
@@ -94,7 +96,8 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
         secrets: deps.secrets,
         fetch: deps.fetch,
         known: sourceState.seen,
-        notBefore: now - config.maxPostAgeHours * HOUR,
+        // Битая запись старше этого — не потерянный пост, а архив или старьё.
+        notBefore: Math.max(cutoff, sourceState.watchingSince ?? -Infinity),
       });
     } catch (err) {
       fail(toSourceError(err, deps.redact));
@@ -137,7 +140,6 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
     const fresh = unseen
       .filter((p) => since === undefined || p.publishedAt >= since)
       .sort((a, b) => a.publishedAt - b.publishedAt);
-    const cutoff = now - config.maxPostAgeHours * HOUR;
     let added = 0;
     for (const post of fresh) {
       if (post.publishedAt < cutoff) {

@@ -62,13 +62,26 @@ export function plainText(text: string): string {
 const LINE_BREAK = /^br\s*\/?$/i;
 const BLOCK_END = /^\/(p|div|li|h[1-6]|blockquote)$/i;
 
-/** HTML описания поста в простой текст: абзацы и переносы — новые строки, теги — прочь. */
+/** HTML описания поста в простой текст: абзацы и переносы — новые строки, теги и комментарии — прочь. */
 export function htmlToText(html: string): string {
   let out = '';
   let pos = 0;
+  // Пока дальше есть «-->», комментарий вырезается целиком: в нём бывает «>»,
+  // и `<!-- a > b -->` иначе оставил бы в тексте «b -->». Когда «-->» больше
+  // нет, «<!--» — обычный тег: повторный поиск на каждом дал бы квадрат.
+  let commentEnds = true;
   for (;;) {
     const lt = html.indexOf('<', pos);
     if (lt === -1) break;
+    if (commentEnds && html.startsWith('<!--', lt)) {
+      const end = html.indexOf('-->', lt + 4);
+      if (end !== -1) {
+        out += html.slice(pos, lt);
+        pos = end + 3;
+        continue;
+      }
+      commentEnds = false;
+    }
     const gt = html.indexOf('>', lt + 1);
     // Дальше нет ни одного «>», значит, и тегов нет: остаток — текст как есть.
     if (gt === -1) break;
@@ -137,30 +150,41 @@ function* elements(xml: string, name: string): Generator<XmlElement & { selfClos
   }
 }
 
+/** Текст как содержимое элемента: `&`, `<` и `>` — сущностями. */
+function escapeText(text: string): string {
+  return text.replace(/[&<>]/g, (ch) => (ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : '&gt;'));
+}
+
 /**
- * Документ без комментариев `<!-- … -->`: закомментированная запись — не пост.
- * Секции CDATA остаются как есть, даже если в их тексте есть «<!--».
+ * Документ, в котором разметка — только разметка. Комментарии `<!-- … -->`
+ * вырезаются: закомментированная запись — не пост. Секции CDATA становятся
+ * экранированным текстом: иначе `</item>` в тексте описания закрыл бы запись,
+ * а «<!--» в нём открыл бы комментарий. Незакрытый «<!--» или «<![CDATA[» —
+ * не секция: остаток документа остаётся как есть, а не исчезает вместе со
+ * всеми записями после него.
  */
-export function stripComments(xml: string): string {
+export function normalizeXml(xml: string): string {
   let out = '';
   let pos = 0;
   // Следующие позиции ищутся заново, только когда разбор их миновал: так
   // документ просматривается один раз, сколько бы в нём ни было секций.
   let comment = xml.indexOf('<!--');
   let cdata = xml.indexOf('<![CDATA[');
-  while (comment !== -1) {
-    if (cdata !== -1 && cdata < comment) {
+  for (;;) {
+    if (cdata !== -1 && (comment === -1 || cdata < comment)) {
       const end = xml.indexOf(']]>', cdata + 9);
       if (end === -1) break;
-      out += xml.slice(pos, end + 3);
+      out += xml.slice(pos, cdata) + escapeText(xml.slice(cdata + 9, end));
+      pos = end + 3;
+    } else if (comment !== -1) {
+      const end = xml.indexOf('-->', comment + 4);
+      if (end === -1) break;
+      out += xml.slice(pos, comment);
       pos = end + 3;
     } else {
-      out += xml.slice(pos, comment);
-      const end = xml.indexOf('-->', comment + 4);
-      if (end === -1) return out;
-      pos = end + 3;
+      break;
     }
-    if (comment < pos) comment = xml.indexOf('<!--', pos);
+    if (comment !== -1 && comment < pos) comment = xml.indexOf('<!--', pos);
     if (cdata !== -1 && cdata < pos) cdata = xml.indexOf('<![CDATA[', pos);
   }
   return out + xml.slice(pos);
