@@ -33,9 +33,22 @@ export function configLanguage(raw: unknown): Texts {
   return textsFor(isLanguage(value) ? value : DEFAULT_LANGUAGE);
 }
 
+/**
+ * Ошибка в содержимом конфига. Несёт язык самого конфига, чтобы и строка лога
+ * вокруг текста ошибки («сбой запуска: …») была на нём, а не на языке по умолчанию.
+ */
+export class ConfigError extends Error {
+  readonly texts: Texts;
+  constructor(message: string, texts: Texts) {
+    super(message);
+    this.name = 'ConfigError';
+    this.texts = texts;
+  }
+}
+
 export function parseConfig(raw: unknown): RadarConfig {
   const t = configLanguage(raw);
-  if (!isRecord(raw)) throw new Error(t.config.notObject);
+  if (!isRecord(raw)) throw new ConfigError(t.config.notObject, t);
   const errors: string[] = [];
 
   const text = (key: string): string => {
@@ -89,7 +102,7 @@ export function parseConfig(raw: unknown): RadarConfig {
     });
   }
 
-  if (errors.length > 0) throw new Error(t.config.errors(errors));
+  if (errors.length > 0) throw new ConfigError(t.config.errors(errors), t);
   return config;
 }
 

@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util';
-import { loadConfig } from './config.ts';
+import { ConfigError, loadConfig } from './config.ts';
 import { readSecrets, runUrlFromEnv, secretValues } from './env.ts';
 import { DEFAULT_LANGUAGE, describe, textsFor, type Texts } from './i18n/index.ts';
 import { runRadar } from './radar.ts';
@@ -21,10 +21,14 @@ let redact = makeRedactor(secretValues(secrets), t.redacted);
 const log = (line: string) => console.log(redact(line));
 const dryRun = values['dry-run'] === true || process.env.RADAR_DRY_RUN === '1';
 
+function useTexts(next: Texts): void {
+  t = next;
+  redact = makeRedactor(secretValues(secrets), t.redacted);
+}
+
 async function main(): Promise<number> {
   const config = loadConfig(values.config);
-  t = textsFor(config.language);
-  redact = makeRedactor(secretValues(secrets), t.redacted);
+  useTexts(textsFor(config.language));
   if (!dryRun && (!secrets.TELEGRAM_BOT_TOKEN || !secrets.TELEGRAM_CHAT_ID)) {
     log(t.log.nothingToSendTo);
     return 1;
@@ -50,6 +54,8 @@ main().then(
     process.exitCode = code;
   },
   (err: unknown) => {
+    // Конфиг разобрался, но с ошибками: его язык уже известен из самой ошибки.
+    if (err instanceof ConfigError) useTexts(err.texts);
     log(t.log.runFailed(describe(err, t)));
     process.exitCode = 1;
   },

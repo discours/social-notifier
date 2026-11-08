@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import { parseConfig } from '../src/config.ts';
@@ -13,7 +14,7 @@ import type { FetchLike } from '../src/http.ts';
 import { en } from '../src/i18n/en.ts';
 import { LANGUAGES, textsFor, type Texts } from '../src/i18n/index.ts';
 import { ru } from '../src/i18n/ru.ts';
-import { runProbe, testMessage } from '../src/probe-run.ts';
+import { runProbe, testMessages } from '../src/probe-run.ts';
 import { newSourceState } from '../src/state.ts';
 import { findRecentChats, MAX_FOUND_CHATS, TelegramError } from '../src/telegram.ts';
 import type { Post, RadarConfig } from '../src/types.ts';
@@ -21,6 +22,8 @@ import { makeRedactor } from '../src/util.ts';
 import { HOUR, json, MINUTE } from './helpers.ts';
 
 const CYRILLIC = /[Ѐ-ӿ]/;
+/** Кириллица в коде — буквой или escape-последовательностью `\u04xx`, `\u{4xx}`. */
+const CYRILLIC_IN_CODE = /[Ѐ-ӿ]|\\u04[0-9a-fA-F]{2}|\\u\{0*4[0-9a-fA-F]{2}\}/;
 const NOW = Date.UTC(2026, 10, 8, 12, 0, 0);
 
 // ---------- Храповик: тексты для людей живут только в каталоге ----------
@@ -55,7 +58,11 @@ function endOfRegex(src: string, start: number): number {
   return src.length;
 }
 
-/** «/» после этих символов и слов начинает регулярное выражение, а не деление. */
+/**
+ * «/» после этих символов и слов начинает регулярное выражение, а не деление.
+ * После «)» слэш читается как деление, поэтому регулярка в `if (x) /re/` без
+ * фигурных скобок сканеру не видна; в src такой формы нет.
+ */
 const REGEX_AFTER = /(?:^|[(,=:[!&|?{};+\-*%<>~^]|\b(?:return|typeof|case|in|of|void|delete|throw|new|else|do|yield|await))\s*$/;
 
 /**
@@ -144,7 +151,7 @@ function sourceFiles(dir: string): string[] {
 
 describe('тексты для людей — только в каталоге языков', () => {
   it('сканер видит кириллицу в строке, шаблоне и регулярке и не видит её в комментариях', () => {
-    const found = (code: string) => CYRILLIC.test(withoutComments(code));
+    const found = (code: string) => CYRILLIC_IN_CODE.test(withoutComments(code));
     // Нарушения: каждое должно найтись, иначе храповик ниже ничего не доказывает.
     assert.ok(found("const a = 'привет';"));
     assert.ok(found('const a = "привет";'));
@@ -158,7 +165,10 @@ describe('тексты для людей — только в каталоге я
     assert.ok(found("const r = /[/]/; const s = 'привет';"));
     assert.ok(found("const d = a / b; const s = 'привет';"));
     assert.ok(found("const u = 'http://x'; const s = 'привет';"));
-    // Комментарии — не нарушение.
+    assert.ok(found("const e = '\\u043f\\u0440';"));
+    assert.ok(found("const e = '\\u{43f}';"));
+    // Комментарии и латиница в escape-последовательностях — не нарушение.
+    assert.ok(!found("const e = '\\u0041\\u{1F600}';"));
     assert.ok(!found('// привет\nconst d = 1;'));
     assert.ok(!found('/* привет */ const d = 1;'));
     assert.ok(!found('/**\n * привет\n */\nconst d = 1;'));
@@ -175,7 +185,7 @@ describe('тексты для людей — только в каталоге я
     const offenders = files.flatMap((path) =>
       withoutComments(readFileSync(path, 'utf8'))
         .split('\n')
-        .filter((line) => CYRILLIC.test(line))
+        .filter((line) => CYRILLIC_IN_CODE.test(line))
         .map((line) => `${path}: ${line.trim()}`),
     );
     assert.deepEqual(offenders, []);
@@ -622,7 +632,7 @@ describe('проба', () => {
     }
   });
 
-  it('образец уведомления влезает в одно сообщение при любом числе источников', () => {
+  it('образец уведомления: каждое сообщение в лимите Telegram, и ни один источник не теряется', () => {
     const sources = Array.from({ length: 80 }, (_, i) => ({ id: `s${i}`, type: 'vk', label: `Long source label number ${i}`, ownerId: -(i + 1) }));
     const config = parseConfig({ ...BASE, messageTitle: 'T'.repeat(256), sources });
     const samples: Post[] = sources.map((source, i) => ({
@@ -633,11 +643,63 @@ describe('проба', () => {
       text: `<${'long text '.repeat(30)}>`,
     }));
     for (const t of [en, ru]) {
-      const html = testMessage(t, config, samples).html;
-      assertTelegramHtml(html, `${t.language}/sample`);
-      assert.ok(html.length > TELEGRAM_TEXT_LIMIT - 500, 'образец заполняет сообщение, а не обрывается рано');
+      const messages = testMessages(t, config, samples);
+      assert.ok(messages.length > 1, `${t.language}: 80 длинных подписей не влезают в одно сообщение`);
+      for (const [index, message] of messages.entries()) assertTelegramHtml(message.html, `${t.language}/sample-${index}`);
+      const [first] = messages;
+      assert.ok(first?.html.startsWith(escapeHtmlLike(t.probe.testMessage)), first?.html);
+      assert.ok((first?.html.length ?? 0) > TELEGRAM_TEXT_LIMIT - 500, 'первое сообщение заполнено, а не обрывается рано');
+      const all = messages.map((message) => message.html).join('\n');
+      for (const sample of samples) assert.ok(all.includes(`${sample.url}"`), `${t.language}: в образце нет ${sample.url}`);
     }
-    assert.equal(testMessage(en, config, []).html, escapeHtmlLike(en.probe.testMessage));
+    assert.deepEqual(testMessages(en, config, []), [{ html: escapeHtmlLike(en.probe.testMessage), disablePreview: true }]);
+  });
+
+  it('send_test присылает весь образец: что не влезло, уходит следующими сообщениями в чат алертов', async () => {
+    const bot = new FakeBot();
+    bot.chats.set('-100111222333', { type: 'supergroup', status: 'administrator' });
+    bot.vkPosts = [{ id: 2, date: Math.floor((NOW - HOUR) / 1000), text: 'Latest post' }];
+    const sources = Array.from({ length: 80 }, (_, i) => ({ id: `s${i}`, type: 'vk', label: `Long source label number ${i}`, ownerId: -(i + 1) }));
+    const { lines, deps } = probeDeps(bot, en, parseConfig({ ...BASE, sources }), { sendTest: true });
+    assert.equal(await runProbe(deps), 0, lines.join('\n'));
+    assert.ok(bot.sent.length > 1, `сообщений: ${bot.sent.length}`);
+    assert.ok(bot.sent.every((sent) => sent.chatId === '444555666'));
+    const all = bot.sent.map((sent) => sent.text).join('\n');
+    for (const source of sources) assert.ok(all.includes(`https://vk.com/wall${source.ownerId}_2"`), `в образце нет ${source.id}`);
+  });
+
+  it('поиск чатов не пишет в чаты, чьи ID уже записаны в секреты', async () => {
+    for (const t of [en, ru]) {
+      const bot = new FakeBot();
+      // Пост в группе постов и /start из чата алертов — оба чата уже известны.
+      bot.updates = [channelPost(-100111222333), message(444555666, 'private'), message(987654321, 'private')];
+      const { lines, deps } = probeDeps(bot, t, undefined, { findChats: true });
+      assert.equal(await runProbe(deps), 0, lines.join('\n'));
+      assert.deepEqual(
+        bot.sent.map((sent) => sent.chatId),
+        ['987654321'],
+      );
+      assert.ok(lines.includes(`${t.probe.chatName(1, 'channel')}: ${t.probe.chatKnown('TELEGRAM_CHAT_ID')}`), lines.join('\n'));
+      assert.ok(lines.includes(`${t.probe.chatName(2, 'private')}: ${t.probe.chatKnown('TELEGRAM_ALERT_CHAT_ID')}`), lines.join('\n'));
+    }
+    // Все найденные чаты уже известны: писать некуда, но это не сбой.
+    const bot = new FakeBot();
+    bot.updates = [channelPost(-100111222333)];
+    assert.equal(await runProbe(probeDeps(bot, en, undefined, { findChats: true }).deps), 0);
+    assert.deepEqual(bot.sent, []);
+  });
+
+  it('find_chats и send_test сразу: идёт поиск чатов, а пропуск send_test назван в логе', async () => {
+    const bot = new FakeBot();
+    bot.updates = [message(987654321, 'private')];
+    const config = parseConfig({ ...BASE, sources: ONE_SOURCE });
+    const { lines, deps } = probeDeps(bot, en, config, { findChats: true, sendTest: true });
+    assert.equal(await runProbe(deps), 0, lines.join('\n'));
+    assert.deepEqual(
+      bot.sent.map((sent) => sent.chatId),
+      ['987654321'],
+    );
+    assert.ok(lines.includes(en.probe.testSkippedForChats), lines.join('\n'));
   });
 
   it('send_test без чата алертов не пишет в чат постов', async () => {
@@ -676,6 +738,29 @@ describe('проводка флагов пробы', () => {
     const withoutFlag = run([]);
     assert.equal(withoutFlag.status, 1, withoutFlag.stderr);
     assert.ok(!withoutFlag.stdout.includes(en.probe.botTokenMissing), withoutFlag.stdout);
+  });
+
+  it('ошибка в конфиге с language ru — строка лога радара и пробы целиком по-русски', () => {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    for (const name of ALL_SECRETS) delete env[name];
+    const dir = mkdtempSync(join(tmpdir(), 'radar-config-'));
+    try {
+      const raw = { ...BASE, language: 'ru', fetchLimit: 0, sources: ONE_SOURCE };
+      const path = join(dir, 'radar.config.json');
+      writeFileSync(path, JSON.stringify(raw));
+      const message = configError(raw);
+      assert.ok(CYRILLIC.test(message), message);
+      for (const [script, line] of [
+        ['src/main.ts', ru.log.runFailed(message)],
+        ['src/probe.ts', ru.probe.crashed(message)],
+      ] as const) {
+        const run = spawnSync(process.execPath, [script, '--config', path], { env, encoding: 'utf8', timeout: 30_000 });
+        assert.equal(run.status, 1, run.stderr);
+        assert.ok(run.stdout.includes(line), `${script}:\n${run.stdout}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

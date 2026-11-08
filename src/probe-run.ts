@@ -2,8 +2,8 @@
  * Проба доступов: читает каждый источник, показывает, что видит токен Meta, и
  * проверяет бота. Состояние не меняет и ничего не отправляет, кроме двух
  * случаев по флагу: тестового сообщения с образцом уведомления в чат алертов
- * (`sendTest`) и сообщения с ID чата в каждый чат, куда недавно добавили бота
- * (`findChats`). Лог публичный: только счётчики, ID постов, даты, типы чатов
+ * (`sendTest`) и сообщения с ID чата в каждый чат из обновлений бота за сутки,
+ * кроме уже записанных в секреты (`findChats`). Лог публичный: только счётчики, ID постов, даты, типы чатов
  * и публичные названия страниц, которые видит токен Meta; ID чатов — никогда.
  */
 import type { Secrets } from './env.ts';
@@ -34,7 +34,10 @@ export interface ProbeDeps {
 
 /** Код выхода пробы: 0 — всё в порядке, 1 — есть проблемы. */
 export async function runProbe(deps: ProbeDeps): Promise<0 | 1> {
-  if (deps.findChats) return probeChats(deps);
+  if (deps.findChats) {
+    if (deps.sendTest) deps.log(deps.t.probe.testSkippedForChats);
+    return probeChats(deps);
+  }
   if (!deps.config) return 1;
   return probeAccess(deps, deps.config);
 }
@@ -139,7 +142,7 @@ async function probeTelegram(deps: ProbeDeps, config: RadarConfig, token: string
       // Только в чат алертов: пробное сообщение в группе постов увидели бы все.
       const target = secrets.TELEGRAM_ALERT_CHAT_ID;
       if (!target) throw new TelegramError((tt) => tt.probe.sendTestNeedsAlertChat);
-      await sendTelegramMessage(deps.fetch, token, target, testMessage(t, config, samples));
+      for (const message of testMessages(t, config, samples)) await sendTelegramMessage(deps.fetch, token, target, message);
       log(t.probe.testSent);
     }
   } catch (err) {
@@ -152,23 +155,25 @@ async function probeTelegram(deps: ProbeDeps, config: RadarConfig, token: string
 /**
  * Тестовое сообщение: проверка связи и, если источники отдали посты, образец
  * настоящего уведомления — по последнему посту каждого источника. Образец
- * собирает тот же formatDigest, что и радар, и влезает в одно сообщение Telegram.
+ * собирает тот же formatDigest, что и радар: не влезло в одно сообщение
+ * Telegram — продолжение уходит следующими, как и у радара.
  */
-export function testMessage(t: Texts, config: RadarConfig, samples: readonly Post[]): { html: string; disablePreview: boolean } {
+export function testMessages(t: Texts, config: RadarConfig, samples: readonly Post[]): { html: string; disablePreview: boolean }[] {
   const check = escapeHtml(t.probe.testMessage);
-  if (samples.length === 0) return { html: check, disablePreview: true };
+  if (samples.length === 0) return [{ html: check, disablePreview: true }];
   const intro = `${check}\n${escapeHtml(t.probe.previewIntro)}\n\n`;
   const labels = new Map(config.sources.map((s) => [s.id, s.label]));
   const sorted = [...samples].sort((a, b) => a.publishedAt - b.publishedAt);
-  const [first] = formatDigest(t, config.messageTitle, sorted, (id) => labels.get(id) ?? id, TELEGRAM_TEXT_LIMIT - intro.length);
-  if (!first) return { html: check, disablePreview: true };
-  return { html: `${intro}${first.html}`, disablePreview: first.disablePreview };
+  const chunks = formatDigest(t, config.messageTitle, sorted, (id) => labels.get(id) ?? id, TELEGRAM_TEXT_LIMIT - intro.length);
+  const [first, ...rest] = chunks;
+  if (!first) return [{ html: check, disablePreview: true }];
+  return [{ html: `${intro}${first.html}`, disablePreview: first.disablePreview }, ...rest];
 }
 
 /**
- * Поиск чатов: бот отвечает в каждый чат из своих последних обновлений
- * сообщением с ID этого чата. ID видит только тот, кто в чате; в публичный
- * лог попадают номер и тип чата.
+ * Поиск чатов: бот отвечает в каждый чат из своих обновлений за сутки
+ * сообщением с ID этого чата, кроме чатов, чьи ID уже записаны в секреты.
+ * ID видит только тот, кто в чате; в публичный лог попадают номер и тип чата.
  */
 async function probeChats(deps: ProbeDeps): Promise<0 | 1> {
   const { t, log, redact } = deps;
@@ -192,9 +197,23 @@ async function probeChats(deps: ProbeDeps): Promise<0 | 1> {
     log(t.probe.chatsNone);
     return 1;
   }
+  // Чат, чей ID уже в секретах, ответа не получает: в группе постов его
+  // увидели бы все подписчики. Сравнение — по записи ID числом, как его даёт поиск.
+  const known = new Map<string, string>();
+  for (const name of ['TELEGRAM_CHAT_ID', 'TELEGRAM_ALERT_CHAT_ID'] as const) {
+    const value = deps.secrets[name]?.trim();
+    if (value) known.set(value, name);
+  }
   let replied = 0;
+  let skipped = 0;
   for (const [index, chat] of chats.entries()) {
     const name = t.probe.chatName(index + 1, chat.type ?? t.probe.unknown);
+    const secret = known.get(chat.id);
+    if (secret) {
+      skipped += 1;
+      log(`${name}: ${t.probe.chatKnown(secret)}`);
+      continue;
+    }
     const html = `${escapeHtml(t.probe.chatIdIntro)} <code>${escapeHtml(chat.id)}</code>\n${escapeHtml(t.probe.chatIdHint)}`;
     try {
       await sendTelegramMessage(deps.fetch, token, chat.id, { html, disablePreview: true });
@@ -205,5 +224,5 @@ async function probeChats(deps: ProbeDeps): Promise<0 | 1> {
     }
   }
   log(t.probe.chatsSummary(chats.length, replied));
-  return replied > 0 ? 0 : 1;
+  return replied + skipped > 0 ? 0 : 1;
 }

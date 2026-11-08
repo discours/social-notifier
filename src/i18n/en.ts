@@ -182,12 +182,14 @@ export const en: Texts = {
     crashed: (message) => `probe failed: ${message}`,
     chatsSection: '== Finding chats ==',
     chatsWebhook:
-      "Telegram does not return updates: another service already receives this bot's updates, through a webhook or its own polling. Take the chat ID from that service's settings.",
+      "Telegram does not return updates: this bot has a webhook, so another service receives its updates. Take the chat ID from that service's settings.",
     chatsNone:
-      'no new chats: add the bot to a group or channel (to a channel as an admin allowed to post), send /start to the bot in a private chat and run the search again. Telegram keeps updates for 24 hours.',
+      "no new chats: add the bot to a group or channel (to a channel as an admin allowed to post), send /start to the bot in a private chat and run the search again. Telegram keeps updates for 24 hours. If another service reads this bot's updates, take the chat ID from that service's settings.",
     chatName: (index, type) => `chat ${index} (${type})`,
     chatReplied: 'ID sent there as a message',
+    chatKnown: (secret) => `already saved in ${secret}, no message sent`,
     chatsSummary: (found, replied) => `chats found: ${found}, ID sent to ${replied}: look for the bot's message in each chat`,
+    testSkippedForChats: 'send_test skipped: the chat search runs on its own; run the probe with send_test once more',
     chatIdIntro: "This chat's ID:",
     chatIdHint:
       'Put it into the TELEGRAM_CHAT_ID secret if posts should arrive here, or into TELEGRAM_ALERT_CHAT_ID for alerts. Sent by the access probe (probe workflow).',

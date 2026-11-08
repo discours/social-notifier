@@ -4,7 +4,8 @@ name: probe
 # и Instagram-аккаунты видит токен Meta, и проверяет бота Telegram.
 # Состояние не трогает. С send_test шлёт в чат алертов тестовое сообщение с
 # образцом уведомления. С find_chats только ищет чаты: бот отвечает в каждый
-# чат, куда его недавно добавили, сообщением с ID этого чата; в лог ID не пишутся.
+# чат из своих обновлений за сутки сообщением с ID этого чата, кроме чатов,
+# уже записанных в секреты; в лог ID не пишутся.
 
 on:
   workflow_dispatch:
@@ -14,7 +15,7 @@ on:
         type: boolean
         default: false
       find_chats:
-        description: 'Find chat IDs: the bot replies with the ID in every chat it was recently added to'
+        description: 'Find chat IDs: the bot replies with the ID in every chat it heard from in the last 24 hours, except chats already saved in secrets'
         type: boolean
         default: false
 

@@ -27,7 +27,7 @@ social-notifier treats silence as a failure. A source that fails two runs in a r
 - **Seven networks, one config file.** VK, Instagram, Facebook, YouTube, X, Bluesky and RSS/Atom, which covers Mastodon, Substack, blogs and podcasts.
 - **English or Russian.** One field, `"language": "en"` or `"ru"`, switches messages, alerts and logs.
 - **A probe that sets you up.** One workflow reads every source with your tokens, shows which pages the Meta token can see, finds your chat IDs — the bot replies with the ID right in each chat — and sends a sample notification built from your latest posts.
-- **Safe in a public repository.** Tokens never reach logs, alerts or saved state; the public log holds counters, IDs and dates. Tokens travel in headers, never in URLs, and every action is pinned by SHA.
+- **Safe in a public repository.** Tokens never reach logs, alerts or saved state; the public log holds counters, IDs and dates. Every action is pinned by SHA.
 - **Nothing to host.** GitHub Actions runs it on schedule; Node.js runs the TypeScript directly, with zero runtime dependencies.
 
 ## Networks
@@ -55,20 +55,7 @@ Your first message, from an RSS feed, Bluesky and YouTube. Commands use the [Git
    gh secret set TELEGRAM_BOT_TOKEN --repo OWNER/REPO
    ```
 
-3. **Find your chat IDs.** Add the bot to the group where posts should go (to a channel — as an admin allowed to post), and send `/start` to the bot in a private chat for alerts. Then run:
-
-   ```bash
-   gh workflow run probe.yml -f find_chats=true --repo OWNER/REPO
-   ```
-
-   The bot replies in each chat with its ID. Save them:
-
-   ```bash
-   gh secret set TELEGRAM_CHAT_ID --repo OWNER/REPO
-   gh secret set TELEGRAM_ALERT_CHAT_ID --repo OWNER/REPO
-   ```
-
-4. **List your sources.** Create `config/newsroom.json` with your own accounts — each network's page says what to put there:
+3. **List your sources.** In the `main` branch of your copy create `config/newsroom.json` (on GitHub: **Add file → Create new file**) with your own accounts — each network's page says what to put there:
 
    ```json
    {
@@ -90,6 +77,19 @@ Your first message, from an RSS feed, Bluesky and YouTube. Commands use the [Git
    ```bash
    gh variable set RADAR_CONFIG --body config/newsroom.json --repo OWNER/REPO
    gh secret set YOUTUBE_API_KEY --repo OWNER/REPO
+   ```
+
+4. **Find your chat IDs.** Add the bot to the group where posts should go (to a channel — as an admin allowed to post), and send `/start` to the bot in a private chat for alerts. Then run:
+
+   ```bash
+   gh workflow run probe.yml -f find_chats=true --repo OWNER/REPO
+   ```
+
+   The bot replies in each chat with its ID. Save them:
+
+   ```bash
+   gh secret set TELEGRAM_CHAT_ID --repo OWNER/REPO
+   gh secret set TELEGRAM_ALERT_CHAT_ID --repo OWNER/REPO
    ```
 
 5. **See a sample.** The probe checks every source and the bot, and sends a sample notification with the latest post of each source to the alerts chat:
@@ -115,7 +115,7 @@ From now on every new post reaches your chat. Instagram, Facebook, VK and X, for
 - A post the radar first sees when it is already older than `maxPostAgeHours` is not sent. A post already in the queue goes out even if Telegram was unavailable for longer.
 - State — seen posts, the queue, failure counters — lives in the `state` branch, apart from the code.
 - When a source fails two runs in a row, the alerts chat gets a message: which network, for how long, what to do and the reason. A response the radar could only partly parse counts as a failure too. After the fix comes “posts are being read again”.
-- An alert and a red run per source happen at most once a day, even when a source fails every other run. GitHub emails about a red scheduled run to whoever last changed the schedule in the workflow or re-enabled it; make sure Actions emails are on: GitHub → Settings → Notifications → Actions.
+- An alert and a red run per source happen at most once a day, even when a source fails every other run. One exception: if an alert said a response was only partly parsed and the source then fails completely, a new alert comes at once. GitHub emails about a red scheduled run to whoever last changed the schedule in the workflow or re-enabled it; make sure Actions emails are on: GitHub → Settings → Notifications → Actions.
 
 Internally the polling is called the radar: workflow `radar`, config `radar.config.json`, variable `RADAR_ENABLED`. Until 08.11.2026 the repository was called `social-radar`; GitHub redirects the old links here.
 

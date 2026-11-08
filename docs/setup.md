@@ -21,7 +21,7 @@ Keep the copy public: GitHub Actions minutes are free for public repositories. I
 
 In a public repository the run logs and the `state` branch are visible. They hold no secrets: the log has only counters, IDs and dates; the state has post IDs, texts of posts waiting to be sent, timestamps and error texts scrubbed of tokens.
 
-**Your own config.** The root holds the working `radar.config.json` of Discours, and the examples on the network pages are its accounts too. In a fork, copy this file, for example to `config/newsroom.json`, put in your own `messageTitle` and sources, and set the path in a repository variable:
+**Your own config.** The root holds the working `radar.config.json` of Discours, and the examples on the network pages are its accounts too. In a fork, copy this file in the `main` branch, for example to `config/newsroom.json`, put in your own `language`, `messageTitle` and sources, and set the path in a repository variable:
 
 ```bash
 gh variable set RADAR_CONFIG --body config/newsroom.json --repo OWNER/REPO
@@ -48,9 +48,9 @@ The `language` field sets the language of messages, alerts and logs: `"en"` or n
    gh workflow run probe.yml -f find_chats=true --repo OWNER/REPO
    ```
 
-   The bot replies in every chat where it recently appeared — group, channel and private chat — with a message holding that chat's ID. IDs never reach the public log: it shows only the number and type of each chat. A group ID is a negative number; for a supergroup or a channel it starts with `-100`.
+   The bot replies in every chat where it recently appeared — group, channel and private chat — with a message holding that chat's ID. Chats whose IDs are already saved in `TELEGRAM_CHAT_ID` or `TELEGRAM_ALERT_CHAT_ID` get no message. IDs never reach the public log: it shows only the number and type of each chat. A group ID is a negative number; for a supergroup or a channel it starts with `-100`.
 
-   Telegram keeps a bot's updates for 24 hours. If the bot was added earlier, send the command `/start@your_bot_name` to the group (by default the bot does not see ordinary group messages), publish any post in the channel, and run the search again. If another service already receives the bot's updates — through a webhook or its own polling — the search says so; then take the ID from that service's settings.
+   Telegram keeps a bot's updates for 24 hours, and the search reads the first 100 of them. If the bot was added earlier, send the command `/start@your_bot_name` to the group (by default the bot does not see ordinary group messages), publish any post in the channel, and run the search again. If another service already receives the bot's updates — through a webhook or its own polling — the search will not see them; take the ID from that service's settings.
 
    Save both IDs:
 
@@ -171,6 +171,6 @@ If something broke that is not covered here, open an issue with the Bug template
 
 - If more than `fetchLimit` posts were published on one network between two successful polls, the radar does not see the extra ones. With polling every 10 minutes this happens only after a long outage.
 - The earliest post of a message arrives no sooner than `groupWindowMinutes` after publication, usually within the next 10 minutes: the first run after the window closes sends it, and GitHub may delay that run too. A shorter window delivers posts faster, but a crosspost to neighbouring networks more often splits into two messages.
-- Delivery is “at least once”: a post can arrive twice but is never lost. A duplicate happens if the state was not saved (a GitHub failure, a run killed by timeout) or if Telegram accepted the message but its reply never reached the radar.
+- Delivery is “at least once”: a post that has entered the queue can arrive twice but is never lost. A duplicate happens if the state was not saved (a GitHub failure, a run killed by timeout) or if Telegram accepted the message but its reply never reached the radar.
 - The GitHub Actions schedule is not exact: a run can be several minutes late, more at peak hours.
 - GitHub disables the schedule of a public repository after 60 days without activity. The radar commits to the `state` branch and re-enables its workflow through the API, but whether GitHub counts that as activity is not documented. If the schedule does get disabled, the Actions page shows a warning, and the **Enable workflow** button turns it back on.

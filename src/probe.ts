@@ -3,7 +3,7 @@
  * [--send-test] [--find-chats]`. Что она делает — в src/probe-run.ts.
  */
 import { parseArgs } from 'node:util';
-import { loadConfig } from './config.ts';
+import { ConfigError, loadConfig } from './config.ts';
 import { readSecrets, secretValues } from './env.ts';
 import { DEFAULT_LANGUAGE, describe, textsFor, type Texts } from './i18n/index.ts';
 import { runProbe } from './probe-run.ts';
@@ -23,13 +23,19 @@ let t: Texts = textsFor(DEFAULT_LANGUAGE);
 let redact = makeRedactor(secretValues(secrets), t.redacted);
 const log = (line: string) => console.log(redact(line));
 
+function useTexts(next: Texts): void {
+  t = next;
+  redact = makeRedactor(secretValues(secrets), t.redacted);
+}
+
 async function main(): Promise<number> {
   let config: RadarConfig | undefined;
   try {
     config = loadConfig(values.config);
-    t = textsFor(config.language);
-    redact = makeRedactor(secretValues(secrets), t.redacted);
+    useTexts(textsFor(config.language));
   } catch (err) {
+    // Конфиг разобрался, но с ошибками: его язык уже известен из самой ошибки.
+    if (err instanceof ConfigError) useTexts(err.texts);
     log(t.probe.crashed(describe(err, t)));
     // Поиск чатов конфигу не нужен: ID чата узнают раньше, чем пишут конфиг.
     if (!values['find-chats']) return 1;

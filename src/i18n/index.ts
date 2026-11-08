@@ -209,7 +209,11 @@ export interface Texts {
     /** Найденный чат в публичном логе: номер и тип, без ID и названия. */
     chatName(index: number, type: string): string;
     readonly chatReplied: string;
+    /** Чат, чей ID уже записан в секрет: ему ничего не отправляется. */
+    chatKnown(secret: string): string;
     chatsSummary(found: number, replied: number): string;
+    /** Отмечены оба флага: поиск чатов идёт один, тестовое сообщение не уходит. */
+    readonly testSkippedForChats: string;
     /** Сообщение в найденный чат: «ID этого чата:», затем сам ID, затем куда его вписать. */
     readonly chatIdIntro: string;
     readonly chatIdHint: string;
