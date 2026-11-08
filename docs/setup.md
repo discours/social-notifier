@@ -29,7 +29,7 @@ gh variable set RADAR_CONFIG --body config/newsroom.json --repo OWNER/REPO
 
 Then **Sync fork** will not conflict with the original's config. Changes to workflow files, such as the schedule in `radar.yml`, **Sync fork** will ask you to merge by hand. In a copy from the template you can simply edit `radar.config.json`.
 
-The `language` field sets the language of messages, alerts and logs: `"en"` or no field for English, `"ru"` for Russian.
+The `language` field sets the language of messages, alerts and logs: `"en"` or no field for English, `"ru"` for Russian. A config written before the field appeared has no `language` and now gets English; add `"language": "ru"` to keep it Russian.
 
 ## 1. Telegram bot
 

@@ -10,7 +10,7 @@ Account posts are read through the X API v2 (`GET /2/users/:id/tweets`) with an 
 
 The radar asks X only for posts newer than the last one it saw (`since_id`). So you mostly pay for new posts:
 
-- the first run reads up to `fetchLimit` posts: $0.125 at 25;
+- the first run reads up to `fetchLimit` posts, but asks for no fewer than 5 (the X minimum): $0.125 at 25, up to $0.025 at `fetchLimit` below 5;
 - after that, $0.005 for each new post: about $0.45 a month at three posts a day;
 - a probe run reads the 5 latest posts: up to $0.025. X charges for the same post once per UTC day, so posts already read that day are usually free.
 
