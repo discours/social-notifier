@@ -14,9 +14,9 @@ import type { FetchLike } from '../src/http.ts';
 import { en } from '../src/i18n/en.ts';
 import { LANGUAGES, textsFor, type Texts } from '../src/i18n/index.ts';
 import { ru } from '../src/i18n/ru.ts';
-import { runProbe, testMessages } from '../src/probe-run.ts';
+import { MAX_FOUND_CHATS, runProbe, testMessages } from '../src/probe-run.ts';
 import { newSourceState } from '../src/state.ts';
-import { findRecentChats, MAX_FOUND_CHATS, TelegramError } from '../src/telegram.ts';
+import { findRecentChats, TelegramError } from '../src/telegram.ts';
 import type { Post, RadarConfig } from '../src/types.ts';
 import { makeRedactor } from '../src/util.ts';
 import { HOUR, json, MINUTE } from './helpers.ts';
@@ -480,14 +480,13 @@ describe('поиск чатов по обновлениям бота', () => {
     );
   });
 
-  it('не больше десяти чатов — последние по времени', async () => {
+  it('все чаты выборки, без предела: предел ставит проба после чатов из секретов', async () => {
     const bot = new FakeBot();
     bot.updates = Array.from({ length: 15 }, (_, i) => message(1000 + i, 'private'));
     const { chats } = await findRecentChats(bot.fetch, TOKEN);
-    assert.equal(MAX_FOUND_CHATS, 10);
     assert.deepEqual(
       chats.map((chat) => chat.id),
-      Array.from({ length: 10 }, (_, i) => String(1005 + i)),
+      Array.from({ length: 15 }, (_, i) => String(1000 + i)),
     );
   });
 
@@ -525,7 +524,7 @@ describe('поиск чатов по обновлениям бота', () => {
     const started = performance.now();
     const { chats } = await findRecentChats(bot.fetch, TOKEN);
     const elapsed = performance.now() - started;
-    assert.equal(chats.length, MAX_FOUND_CHATS);
+    assert.equal(chats.length, 100_000);
     assert.equal(chats.at(-1)?.id, '100000');
     assert.ok(elapsed < 3000, `разбор занял ${Math.round(elapsed)} мс`);
   });
@@ -630,6 +629,35 @@ describe('проба', () => {
       const short = probeDeps(calm, t, undefined, { findChats: true });
       assert.equal(await runProbe(short.deps), 0, short.lines.join('\n'));
       assert.ok(!short.lines.includes(t.probe.chatsTruncated), short.lines.join('\n'));
+    }
+  });
+
+  it('новых чатов больше десяти: ID — в десять самых поздних, строка в логе и код 1; чаты из секретов в предел не входят', async () => {
+    assert.equal(MAX_FOUND_CHATS, 10);
+    for (const t of [en, ru]) {
+      const crowded = new FakeBot();
+      crowded.updates = Array.from({ length: 11 }, (_, i) => message(1000 + i, 'private'));
+      const many = probeDeps(crowded, t, undefined, { findChats: true });
+      assert.equal(await runProbe(many.deps), 1, many.lines.join('\n'));
+      assert.deepEqual(
+        crowded.sent.map((sent) => sent.chatId),
+        Array.from({ length: 10 }, (_, i) => String(1001 + i)),
+      );
+      assert.ok(many.lines.includes(t.probe.chatsLimited(MAX_FOUND_CHATS)), many.lines.join('\n'));
+      // Десять новых чатов, а оба чата из секретов — среди самых поздних: ID получают все десять.
+      const mixed = new FakeBot();
+      mixed.updates = [
+        ...Array.from({ length: 10 }, (_, i) => message(2000 + i, 'private')),
+        channelPost(-100111222333),
+        message(444555666, 'private'),
+      ];
+      const fits = probeDeps(mixed, t, undefined, { findChats: true });
+      assert.equal(await runProbe(fits.deps), 0, fits.lines.join('\n'));
+      assert.deepEqual(
+        mixed.sent.map((sent) => sent.chatId),
+        Array.from({ length: 10 }, (_, i) => String(2000 + i)),
+      );
+      assert.ok(!fits.lines.includes(t.probe.chatsLimited(MAX_FOUND_CHATS)), fits.lines.join('\n'));
     }
   });
 

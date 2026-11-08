@@ -171,10 +171,13 @@ export function testMessages(t: Texts, config: RadarConfig, samples: readonly Po
   return [{ html: `${intro}${first.html}`, disablePreview: first.disablePreview }, ...rest];
 }
 
+/** Больше новых чатов поиск не отвечает: сообщение с ID уходит в каждый, и это не рассылка. */
+export const MAX_FOUND_CHATS = 10;
+
 /**
- * Поиск чатов: бот отвечает сообщением с ID чата не больше чем в
- * MAX_FOUND_CHATS чатов из первых 100 своих обновлений за сутки, кроме чатов,
- * чьи ID уже записаны в секреты; записанный ID не узнался — не пишет никуда.
+ * Поиск чатов: бот отвечает сообщением с ID чата в чаты из первых 100 своих
+ * обновлений за сутки, кроме чатов, чьи ID уже записаны в секреты, — не больше
+ * чем в MAX_FOUND_CHATS самых поздних; записанный ID не узнался — не пишет никуда.
  * ID видит только тот, кто в чате; в публичный лог попадают номер и тип чата.
  */
 async function probeChats(deps: ProbeDeps): Promise<0 | 1> {
@@ -217,9 +220,14 @@ async function probeChats(deps: ProbeDeps): Promise<0 | 1> {
       return 1;
     }
   }
+  // Чаты из секретов в предел не входят: иначе новый чат выпал бы из-за них.
+  const fresh = chats.filter((chat) => !known.has(chat.id));
+  const limited = fresh.length > MAX_FOUND_CHATS;
+  const latest = new Set(fresh.slice(-MAX_FOUND_CHATS).map((chat) => chat.id));
+  const shown = chats.filter((chat) => known.has(chat.id) || latest.has(chat.id));
   let replied = 0;
   let failed = 0;
-  for (const [index, chat] of chats.entries()) {
+  for (const [index, chat] of shown.entries()) {
     const name = t.probe.chatName(index + 1, chat.type ?? t.probe.unknown);
     const secret = known.get(chat.id);
     if (secret) {
@@ -237,10 +245,11 @@ async function probeChats(deps: ProbeDeps): Promise<0 | 1> {
     }
   }
   log(t.probe.chatsSummary(chats.length, replied));
+  if (limited) log(t.probe.chatsLimited(MAX_FOUND_CHATS));
   // Все найденные чаты уже в секретах: нового нет — та же подсказка, что при пустой выборке.
   if (replied + failed === 0) log(t.probe.chatsNone);
   // Зелёный — только если ID дошёл до каждого нового чата и выборка полная.
   // Отказ одного чата не мешает остальным, но в тот чат ID не дошёл; в
-  // неполной выборке нужный чат мог не оказаться.
-  return failed === 0 && replied > 0 && !found.truncated ? 0 : 1;
+  // неполной выборке и сверх предела нужный чат мог не оказаться.
+  return failed === 0 && replied > 0 && !found.truncated && !limited ? 0 : 1;
 }

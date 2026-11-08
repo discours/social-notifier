@@ -48,7 +48,7 @@ The `language` field sets the language of messages, alerts and logs: `"en"` or n
    gh workflow run probe.yml -f find_chats=true --repo OWNER/REPO
    ```
 
-   The bot replies in up to 10 chats where it recently appeared — group, channel and private chat — with a message holding that chat's ID. Chats whose IDs are already saved in `TELEGRAM_CHAT_ID` or `TELEGRAM_ALERT_CHAT_ID` get no message; any other chat gets it on every search, so save the IDs before searching again. IDs never reach the public log: it shows only the number and type of each chat. A group ID is a negative number; for a supergroup or a channel it starts with `-100`.
+   The bot replies in up to 10 chats where it recently appeared — group, channel and private chat — with a message holding that chat's ID. Chats whose IDs are already saved in `TELEGRAM_CHAT_ID` or `TELEGRAM_ALERT_CHAT_ID` get no message and do not count toward the 10; any other chat gets it on every search, so save the IDs before searching again. If there are more than 10 new chats, the ID goes to the 10 with the latest updates, the search says so, and the run is red. IDs never reach the public log: it shows only the number and type of each chat. A group ID is a negative number; for a supergroup or a channel it starts with `-100`.
 
    Telegram keeps a bot's updates for 24 hours, and the search reads the first 100 of them; if there are more, it says so. If the bot was added earlier, send the command `/start@your_bot_name` to the group (by default the bot does not see ordinary group messages), publish any post in the channel, and run the search again. If another service already receives the bot's updates — through a webhook or its own polling — the search will not see them; take the ID from that service's settings.
 

@@ -181,8 +181,6 @@ export interface FoundChat {
   type: string | undefined;
 }
 
-/** Больше чатов поиск не отвечает: сообщение с ID уходит в каждый, и это не рассылка. */
-export const MAX_FOUND_CHATS = 10;
 /** Столько обновлений отдаёт один getUpdates; полная выдача значит, что более поздние не видны. */
 export const UPDATES_LIMIT = 100;
 const CHAT_TYPE = /^[a-z_]{1,20}$/;
@@ -197,8 +195,9 @@ const CHAT_UPDATES = ['message', 'edited_message', 'channel_post', 'edited_chann
  * подписка бота на типы обновлений не меняется. Цена — Telegram отдаёт 100
  * самых ранних неподтверждённых обновлений: у бота с большим потоком чат,
  * добавленный позже, в выборку не попадёт. Чат, откуда бота убрали, не
- * возвращается. Из выборки — до MAX_FOUND_CHATS чатов с самыми поздними
- * обновлениями; `truncated` — выборка полная, и более поздние обновления не видны.
+ * возвращается. Чаты — все из выборки, в порядке последнего обновления; предел
+ * ответов ставит проба, отсеяв чаты из секретов. `truncated` — выборка полная,
+ * и более поздние обновления не видны.
  * Бот с webhook или с одновременным чужим опросом отвечает HTTP 409 —
  * исключение TelegramError со статусом 409.
  */
@@ -224,7 +223,6 @@ export async function findRecentChats(fetchFn: FetchLike, token: string): Promis
   return {
     chats: [...chats.values()]
       .filter((chat) => !chat.removed)
-      .slice(-MAX_FOUND_CHATS)
       .map(({ id, type }) => ({ id, type })),
     truncated: result.length >= UPDATES_LIMIT,
   };

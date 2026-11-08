@@ -12,9 +12,9 @@ The radar asks X only for posts newer than the last one it saw (`since_id`). So 
 
 - the first run reads up to `fetchLimit` posts: $0.125 at 25;
 - after that, $0.005 for each new post: about $0.45 a month at three posts a day;
-- each probe run reads the 5 latest posts again, which is $0.025.
+- a probe run reads the 5 latest posts: up to $0.025. X charges for the same post once per UTC day, so posts already read that day are usually free.
 
-X documentation does not say whether an empty response is billed, or what the minimum top-up is. Check in the console after the first day.
+X bills each post in the response, so a response without new posts should cost nothing; the documentation does not say so outright and does not name a minimum top-up. Check in the console after the first day.
 
 ## Token
 

@@ -208,6 +208,8 @@ export interface Texts {
     readonly chatsNone: string;
     /** getUpdates отдал полную выборку: более поздние обновления не видны. */
     readonly chatsTruncated: string;
+    /** Новых чатов больше предела: ID ушёл только в самые поздние. */
+    chatsLimited(limit: number): string;
     /** Найденный чат в публичном логе: номер и тип, без ID и названия. */
     chatName(index: number, type: string): string;
     readonly chatReplied: string;

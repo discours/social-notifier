@@ -187,6 +187,8 @@ export const en: Texts = {
       "no new chats: add the bot to a group or channel (to a channel as an admin allowed to post), send /start to the bot in a private chat and run the search again. Telegram keeps updates for 24 hours. If another service reads this bot's updates, take the chat ID from that service's settings.",
     chatsTruncated:
       'the bot has 100 or more pending updates, and the search sees only the oldest 100: a chat added later may be missing. Telegram deletes updates after 24 hours, so a later search sees newer ones.',
+    chatsLimited: (limit) =>
+      `more than ${limit} new chats: the ID went only to the ${limit} with the latest updates, and the chat you need may not be among them. Write there again — /start to the bot, /start@your_bot_name in a group, any post in a channel — and run the search again.`,
     chatName: (index, type) => `chat ${index} (${type})`,
     chatReplied: 'ID sent there as a message',
     chatKnown: (secret) => `already saved in ${secret}, no message sent`,
