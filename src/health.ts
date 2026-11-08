@@ -15,8 +15,10 @@ export const REALERT_AFTER_MS = 24 * 60 * 60 * 1000;
 
 /** Отмечает неудачу. Возвращает true, если пора слать алерт. */
 export function recordFailure(state: SourceState, err: SourceError, now: number): boolean {
+  // Начало серии известно, только если серия началась при этой версии: у
+  // сбоя, тянущегося с прошлой версии, поля нет, и алерт считает запуски.
+  if (state.consecutiveFailures === 0) state.failingSince = now;
   state.consecutiveFailures += 1;
-  state.failingSince ??= now;
   state.lastError = { kind: err.kind, message: err.message, at: now, ...(err.code ? { code: err.code } : {}) };
   if (state.consecutiveFailures < ALERT_AFTER_FAILURES) return false;
   return state.alertedAt === undefined || now - state.alertedAt >= REALERT_AFTER_MS;
@@ -78,7 +80,7 @@ export function failureHint(kind: FailureKind, source: SourceConfig): string {
     case 'rate_limit':
       return 'обычно ничего: сеть просит обращаться реже, и это проходит само. Если алерт повторится через сутки, сделайте опрос реже — строка cron в .github/workflows/radar.yml.';
     case 'config':
-      return `проверьте источник «${source.id}» в radar.config.json${secret ? ` и секрет ${secret}` : ''}.`;
+      return `проверьте источник «${source.id}» в конфиге (radar.config.json или файл из переменной RADAR_CONFIG)${secret ? ` и секрет ${secret}` : ''}.`;
     case 'network':
     case 'http':
       return 'обычно ничего: сбой на стороне сети проходит сам. Если алерт повторится через сутки, откройте лог запуска.';
@@ -110,6 +112,8 @@ export interface AlertContext {
   now: number;
   /** Порог свежести из конфига: посты старше после починки не придут. */
   maxPostAgeHours: number;
+  /** Сколько последних постов радар читает за раз: вышедшие сверх этого за время сбоя он не увидит. */
+  fetchLimit: number;
   runUrl?: string;
 }
 
@@ -125,7 +129,7 @@ export function formatFailureAlert(source: SourceConfig, state: SourceState, err
   const lines = [
     `<b>${escapeHtml(source.label)}</b>: посты не читаются, ${since}.`,
     `Что сделать: ${escapeHtml(failureHint(err.kind, source))}`,
-    `Посты, вышедшие за это время, придут после починки, если им будет меньше ${ctx.maxPostAgeHours} ч.`,
+    `Посты, вышедшие за это время, придут после починки, если им будет меньше ${ctx.maxPostAgeHours} ч и их наберётся не больше ${ctx.fetchLimit}.`,
     `Причина: <code>${err.kind}</code> — ${escapeHtml(err.message)}`,
   ];
   if (ctx.runUrl) lines.push(`<a href="${escapeHtml(ctx.runUrl)}">Лог запуска</a>`);

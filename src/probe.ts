@@ -12,6 +12,9 @@ import { graphGet } from './sources/meta.ts';
 import { checkChatAccess, getBotIdentity, sendTelegramMessage } from './telegram.ts';
 import { asString, isRecord, makeRedactor } from './util.ts';
 
+/** Сколько последних постов проба читает у каждой сети: меньше X API не отдаёт. */
+export const PROBE_FETCH_LIMIT = 5;
+
 const { values } = parseArgs({
   options: {
     config: { type: 'string', default: 'radar.config.json' },
@@ -26,7 +29,8 @@ const fetchFn = globalThis.fetch;
 
 async function main(): Promise<number> {
   const config = loadConfig(values.config);
-  const ctx = { config, secrets, fetch: fetchFn };
+  // Пробе хватит нескольких постов, а X берёт деньги за каждый прочитанный.
+  const ctx = { config: { ...config, fetchLimit: Math.min(config.fetchLimit, PROBE_FETCH_LIMIT) }, secrets, fetch: fetchFn };
   let failed = 0;
 
   log('== Источники ==');
@@ -59,7 +63,7 @@ async function main(): Promise<number> {
         limit: '25',
       });
       const data = Array.isArray(pages.data) ? pages.data : [];
-      if (data.length === 0) log('страниц не видно: проверь, что странице выдан доступ');
+      if (data.length === 0) log('страниц не видно: проверьте, что системному пользователю выдан доступ к странице');
       for (const page of data) {
         if (!isRecord(page)) continue;
         const ig = isRecord(page.instagram_business_account) ? page.instagram_business_account : undefined;

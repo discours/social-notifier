@@ -115,13 +115,16 @@ export function parseXTimeline(source: XSource, status: number, body: unknown): 
 
 // Коды: https://docs.x.com/x-api/fundamentals/response-codes-and-errors
 export function classifyXError(status: number, body: unknown): FailureKind {
+  const type = isRecord(body) ? (asString(body.type) ?? '') : '';
+  const title = isRecord(body) ? asString(body.title) : undefined;
+  // Исчерпанный лимит тарифа приходит и с 429, и с 403: это оплата, а не «обращайтесь реже».
+  if (/usage-capped/.test(type) || title === 'UsageCapExceeded') return 'billing';
   if (status === 401) return 'auth';
   if (status === 402) return 'billing';
   if (status === 429) return 'rate_limit';
   if (status === 403) {
     // «client-not-enrolled» и подобные: приложение не в проекте или тариф не включает метод.
-    const type = isRecord(body) ? (asString(body.type) ?? '') : '';
-    return /client-forbidden|not-enrolled|usage-capped/.test(type) ? 'billing' : 'permission';
+    return /client-forbidden|not-enrolled/.test(type) ? 'billing' : 'permission';
   }
   if (status === 400 || status === 404) return 'config';
   return 'http';

@@ -10,6 +10,7 @@ import { classifyBlueskyError, fetchBlueskyPosts, type BlueskySource } from '../
 import { feedUrl, fetchFeedPosts, parseFeed, type FeedSource } from '../src/sources/feed.ts';
 import { allAdapters, findAdapter, SOURCE_TYPES, type SourceContext } from '../src/sources/index.ts';
 import { fetchXPosts, newestId, type XSource } from '../src/sources/x.ts';
+import { MAX_STORED_TEXT } from '../src/sources/parse.ts';
 import { decodeEntities, htmlToText } from '../src/sources/xml.ts';
 import { fetchYoutubePosts, type YoutubeSource } from '../src/sources/youtube.ts';
 import { runRadar } from '../src/radar.ts';
@@ -83,6 +84,22 @@ describe('Bluesky', () => {
     assert.equal(url.searchParams.get('actor'), 'discours.bsky.social');
     assert.equal(url.searchParams.get('filter'), 'posts_no_replies');
     assert.equal(url.searchParams.get('limit'), '10');
+  });
+
+  it('импортированный архив: старая createdAt при свежем indexedAt — пост старый, а не новый', async () => {
+    const item = bskyItem('3mzimport22a', '2019-05-01T00:00:00.000Z');
+    item.post.indexedAt = '2026-11-08T11:00:00.000Z';
+    const { fetch } = fakeFetch(() => json({ feed: [item] }));
+    const { posts } = await fetchBlueskyPosts(BSKY, ctx(fetch));
+    assert.equal(posts[0]?.publishedAt, Date.parse('2019-05-01T00:00:00.000Z'));
+  });
+
+  it('неподтверждённый хэндл (handle.invalid) — ссылка по DID', async () => {
+    const item = bskyItem('3mzinvalid2a', '2026-11-08T10:00:00.000Z');
+    item.post.author.handle = 'handle.invalid';
+    const { fetch } = fakeFetch(() => json({ feed: [item] }));
+    const { posts } = await fetchBlueskyPosts(BSKY, ctx(fetch));
+    assert.equal(posts[0]?.url, `https://bsky.app/profile/${DID}/post/3mzinvalid2a`);
   });
 
   it('время — меньшее из createdAt и indexedAt: дата из будущего не держит пост', async () => {
@@ -240,6 +257,103 @@ describe('RSS и Atom', () => {
     assert.equal(htmlToText('<p>Раз<br>два</p><ul><li>три</li></ul>'), 'Раз\nдва\nтри');
     const xxe = `<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x "ВЗРЫВ">]><rss><channel><item><guid>a</guid><link>https://e.com/a</link><pubDate>Mon, 19 Oct 2026 09:58:39 +0000</pubDate><title>&x;</title></item></channel></rss>`;
     assert.equal(parseFeed(FEED, xxe, 10).posts[0]?.text, '&x;');
+    assert.equal(decodeEntities('&toString; &valueOf;'), '&toString; &valueOf;', 'имена прототипа — не сущности');
+  });
+
+  it('враждебная лента разбирается за линейное время: незакрытые теги и «<» без «>» не вешают радар', () => {
+    const item = (body: string) => `<rss><channel><item><guid>a</guid><link>https://e.com/a</link><pubDate>Mon, 19 Oct 2026 09:58:39 +0000</pubDate>${body}</item></channel></rss>`;
+    // Размеры подобраны так, чтобы квадратичный разбор краснел за секунды, а не висел минутами.
+    const hostile = [
+      `<rss><channel>${'<item>'.repeat(60_000)}</channel></rss>`,
+      item(`${'<title>'.repeat(50_000)}`),
+      item(`<description>${'&lt;'.repeat(80_000)}</description>`),
+      `<feed><entry><id>a</id><link ${'h'.repeat(100_000)}/><updated>2026-10-19T09:58:39Z</updated></entry></feed>`,
+      `<rss><channel>${'<item><guid>'.repeat(30_000)}</channel></rss>`,
+    ];
+    const started = performance.now();
+    // Повторный поиск «>» после каждого «<» тоже квадратичен, просто быстр: ловится только объёмом.
+    assert.equal(htmlToText('<'.repeat(1_500_000)).length, 1_500_000);
+    for (const xml of hostile) {
+      try {
+        parseFeed(FEED, xml, 10);
+      } catch (err) {
+        assert.ok(err instanceof SourceError, String(err));
+      }
+    }
+    // Прежний разбор регулярками тратил на такие входы минуты, линейный — миллисекунды.
+    const elapsed = performance.now() - started;
+    assert.ok(elapsed < 3000, `разбор занял ${Math.round(elapsed)} мс`);
+  });
+
+  it('тип ленты — по корневому элементу: запись Atom может цитировать разметку RSS', () => {
+    const atom = `<?xml version="1.0"?><!-- комментарий --><feed xmlns="http://www.w3.org/2005/Atom">
+      <entry><id>a</id><link href="https://e.com/a"/><updated>2026-10-19T09:58:39Z</updated>
+      <content type="html"><![CDATA[Как начать: <rss version="2.0"> и <channel>]]></content></entry></feed>`;
+    assert.deepEqual(parseFeed(FEED, atom, 10).posts.map((p) => p.url), ['https://e.com/a']);
+    const rss = `<rss><channel><item><guid>b</guid><link>https://e.com/b</link><pubDate>Mon, 19 Oct 2026 09:58:39 +0000</pubDate>
+      <description>&lt;feed&gt; и &lt;entry&gt; — это Atom</description></item></channel></rss>`;
+    assert.deepEqual(parseFeed(FEED, rss, 10).posts.map((p) => p.url), ['https://e.com/b']);
+    const rdf = `<?xml version="1.0"?><rdf:RDF><channel><title>t</title></channel><item><link>https://e.com/c</link><dc:date>2026-10-19T09:58:39Z</dc:date><title>RSS 1.0</title></item></rdf:RDF>`;
+    assert.deepEqual(parseFeed(FEED, rdf, 10).posts.map((p) => p.text), ['RSS 1.0']);
+  });
+
+  it('заголовок — простой текст, сущности раскрываются один раз; HTML чистится только там, где он HTML', () => {
+    const rss = `<rss><channel><item><guid>a</guid><link>https://e.com/a</link><pubDate>Mon, 19 Oct 2026 09:58:39 +0000</pubDate>
+      <title>a &lt; b и c &gt; d, &amp;amp;</title></item></channel></rss>`;
+    assert.equal(parseFeed(FEED, rss, 10).posts[0]?.text, 'a < b и c > d, &amp;');
+    const entry = (title: string) =>
+      `<feed><entry><id>a</id><link href="https://e.com/a"/><updated>2026-10-19T09:58:39Z</updated>${title}</entry></feed>`;
+    assert.equal(parseFeed(FEED, entry('<title>x &lt;y&gt; z</title>'), 10).posts[0]?.text, 'x <y> z');
+    assert.equal(parseFeed(FEED, entry('<title type="html">x &lt;b&gt;жирный&lt;/b&gt; &amp;amp; z</title>'), 10).posts[0]?.text, 'x жирный & z');
+    assert.equal(parseFeed(FEED, entry('<title type="xhtml"><div>x <b>y</b> &amp; z</div></title>'), 10).posts[0]?.text, 'x y & z');
+  });
+
+  it('имя тега — целиком: <title> не путается с <titleHint> и <media:title>, <link> — с <links>', () => {
+    const rss = `<rss><channel><item><guid>a</guid><links>https://e.com/wrong</links><link>https://e.com/a</link>
+      <pubDate>Mon, 19 Oct 2026 09:58:39 +0000</pubDate><titleHint>нет</titleHint><media:title>нет</media:title><title>да</title></item></channel></rss>`;
+    assert.deepEqual(parseFeed(FEED, rss, 10).posts.map((p) => [p.url, p.text]), [['https://e.com/a', 'да']]);
+  });
+
+  it('старая неразобранная запись за пределами свежих не даёт вечного сбоя; свежая — считается', () => {
+    const good = (i: number) =>
+      `<item><guid>g${i}</guid><link>https://e.com/${i}</link><pubDate>${new Date(NOW - i * HOUR).toUTCString()}</pubDate></item>`;
+    const noLink = (hoursAgo: number) => `<item><guid>broken</guid><pubDate>${new Date(NOW - hoursAgo * HOUR).toUTCString()}</pubDate></item>`;
+    const feed = (extra: string) => `<rss><channel>${good(1)}${good(2)}${good(3)}${extra}</channel></rss>`;
+    assert.deepEqual(parseFeed(FEED, feed(noLink(100)), 2), { posts: parseFeed(FEED, feed(''), 2).posts, skipped: 0 });
+    assert.equal(parseFeed(FEED, feed(noLink(0)), 2).skipped, 1, 'новее оставленных — могла бы прийти');
+    assert.equal(parseFeed(FEED, feed(noLink(100)), 10).skipped, 1, 'все записи в выдаче — считается любая');
+    assert.equal(parseFeed(FEED, feed('<item><guid>x</guid><link>https://e.com/x</link></item>'), 2).skipped, 1, 'без даты — неизвестно, свежая ли');
+  });
+
+  it('у выпуска подкаста без <link> ссылка — файл из <enclosure>', () => {
+    const rss = `<rss><channel><item><guid isPermaLink="false">ep-12</guid><pubDate>Mon, 19 Oct 2026 09:58:39 +0000</pubDate>
+      <title>Выпуск 12</title><enclosure url="https://cdn.e.com/ep12.mp3" length="1" type="audio/mpeg"/></item></channel></rss>`;
+    assert.deepEqual(parseFeed(FEED, rss, 10).posts.map((p) => [p.id, p.url]), [['ep-12', 'https://cdn.e.com/ep12.mp3']]);
+  });
+
+  it('ответ больше 10 МБ не дочитывается; перенаправление на http — отказ', async () => {
+    const huge = fakeFetch(() => text(`<rss><channel>${' '.repeat(11 * 1024 * 1024)}</channel></rss>`));
+    await assert.rejects(fetchFeedPosts(FEED, ctx(huge.fetch)), (e) => e instanceof SourceError && e.kind === 'bad_response' && /10 МБ/.test(e.message));
+    const downgraded = fakeFetch(() => {
+      const res = text(MASTODON_RSS);
+      Object.defineProperty(res, 'url', { value: 'http://mastodon.social/@Mastodon.rss' });
+      return res;
+    });
+    await assert.rejects(fetchFeedPosts(FEED, ctx(downgraded.fetch)), (e) => e instanceof SourceError && e.kind === 'config' && /без https/.test(e.message));
+    const kept = fakeFetch(() => {
+      const res = text(MASTODON_RSS);
+      Object.defineProperty(res, 'url', { value: 'https://mastodon.social/@Mastodon.rss' });
+      return res;
+    });
+    assert.equal((await fetchFeedPosts(FEED, ctx(kept.fetch))).posts.length, 2);
+  });
+
+  it('текст поста хранится обрезанным: длинная запись не раздувает состояние', () => {
+    const rss = `<rss><channel><item><guid>a</guid><link>https://e.com/a</link><pubDate>Mon, 19 Oct 2026 09:58:39 +0000</pubDate>
+      <title>${'слово '.repeat(2000)}</title></item></channel></rss>`;
+    const post = parseFeed(FEED, rss, 10).posts[0];
+    assert.equal(post?.text.length, MAX_STORED_TEXT);
+    assert.ok(post?.text.startsWith('слово слово'));
   });
 });
 
@@ -285,6 +399,14 @@ describe('YouTube', () => {
       assert.ok(!call.url.includes(SECRETS.YOUTUBE_API_KEY ?? '-'), 'ключ не в адресе');
       assert.equal(call.headers['x-goog-api-key'], SECRETS.YOUTUBE_API_KEY);
     }
+  });
+
+  it('время видео — публикация, а не попадание в плейлист: старое видео, добавленное сегодня, — старое', async () => {
+    const video = ytVideo('dQw4w9WgXcQ', '2026-11-08T11:00:00Z');
+    video.contentDetails.videoPublishedAt = '2021-03-01T10:00:00Z';
+    const { fetch } = fakeFetch(youtubeApi([video]));
+    const { posts } = await fetchYoutubePosts(YT, ctx(fetch));
+    assert.equal(posts[0]?.publishedAt, Date.parse('2021-03-01T10:00:00Z'));
   });
 
   it('элемент без статуса не отбрасывается молча, а считается неразобранным', async () => {
@@ -382,6 +504,10 @@ describe('X', () => {
       [{ title: 'Payment Required', status: 402 }, 402, 'billing'],
       [{ title: 'Client Forbidden', type: 'https://api.twitter.com/2/problems/client-forbidden', reason: 'client-not-enrolled' }, 403, 'billing'],
       [{ title: 'Too Many Requests', status: 429 }, 429, 'rate_limit'],
+      [{ title: 'UsageCapExceeded', type: 'https://api.twitter.com/2/problems/usage-capped', detail: 'Usage cap exceeded: Monthly product cap' }, 429, 'billing'],
+      [{ title: 'Forbidden', type: 'about:blank' }, 403, 'permission'],
+      [{ title: 'Invalid Request', type: 'https://api.twitter.com/2/problems/invalid-request' }, 400, 'config'],
+      [{ title: 'Not Found Error', type: 'https://api.twitter.com/2/problems/resource-not-found' }, 404, 'config'],
       [{ errors: [{ title: 'Not Found Error', detail: 'Could not find user with id: [1].' }] }, 200, 'config'],
       [{ errors: [{ title: 'Authorization Error', detail: 'Sorry, you are not authorized.' }] }, 200, 'permission'],
       [{ something: 'else' }, 200, 'bad_response'],
@@ -403,14 +529,23 @@ describe('реестр сетей', () => {
       assert.ok(existsSync(new URL(`../${adapter.docs}`, import.meta.url)), `${adapter.type}: нет ${adapter.docs}`);
       for (const secret of adapter.secrets) assert.ok((SOURCE_SECRETS as readonly string[]).includes(secret));
     }
+    const used = new Set<string>(allAdapters().flatMap((adapter) => adapter.secrets));
+    assert.deepEqual(SOURCE_SECRETS.filter((secret) => !used.has(secret)), [], 'секрет, которого не просит ни одна сеть');
     assert.deepEqual([...SOURCE_TYPES].sort(), ['bluesky', 'facebook', 'feed', 'instagram', 'vk', 'x', 'youtube']);
   });
 
-  it('каждый секрет передан шагу радара и шагу пробы, и ни одного лишнего', () => {
-    for (const workflow of ['.github/workflows/radar.yml', '.github/workflows/probe.yml']) {
-      const passed = [...read(workflow).matchAll(/^\s+([A-Z_]+): \$\{\{ secrets\.([A-Z_]+) \}\}$/gm)];
+  it('каждый секрет передан именно шагу радара и шагу пробы, и ни одного лишнего', () => {
+    for (const [workflow, step] of [
+      ['.github/workflows/radar.yml', 'Радар'],
+      ['.github/workflows/probe.yml', 'Проба'],
+    ] as const) {
+      const steps = read(workflow).split(/^(?=\s+- name: )/m);
+      const stepText = steps.find((s) => s.trimStart().startsWith(`- name: ${step}\n`)) ?? '';
+      const passed = [...stepText.matchAll(/^\s+([A-Z_]+): \$\{\{ secrets\.([A-Z_]+) \}\}$/gm)];
       for (const [, env, secret] of passed) assert.equal(env, secret, `${workflow}: ${env} берёт чужой секрет`);
-      assert.deepEqual(passed.map((m) => m[1]).sort(), [...ALL_SECRETS].sort(), workflow);
+      assert.deepEqual(passed.map((m) => m[1]).sort(), [...ALL_SECRETS].sort(), `${workflow}, шаг «${step}»`);
+      const elsewhere = steps.filter((s) => s !== stepText).join('').match(/secrets\.[A-Z_]+/g) ?? [];
+      assert.deepEqual(elsewhere, [], `${workflow}: секреты сетей уходят в другие шаги`);
     }
   });
 
@@ -421,19 +556,23 @@ describe('реестр сетей', () => {
     assert.equal(findAdapter('bluesky')?.network, 'Bluesky');
   });
 
-  it('примеры источников в документации проходят проверку конфига', () => {
+  it('у каждой сети на её странице есть пример источника, и он проходит проверку конфига', () => {
     const dir = new URL('../docs/sources/', import.meta.url);
-    let checked = 0;
+    const examples = new Map<string, Set<unknown>>();
     for (const file of readdirSync(dir)) {
       const md = readFileSync(new URL(file, dir), 'utf8');
       for (const [, block] of md.matchAll(/```json\n([\s\S]*?)```/g)) {
         const parsed: unknown = JSON.parse(block ?? '');
-        const sources = Array.isArray(parsed) ? parsed : [parsed];
+        const sources: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
         assert.doesNotThrow(() => parseConfig({ messageTitle: 't', groupWindowMinutes: 10, maxPostAgeHours: 48, fetchLimit: 10, sources }), file);
-        checked += sources.length;
+        const types = examples.get(`docs/sources/${file}`) ?? new Set<unknown>();
+        for (const source of sources) types.add((source as { type?: unknown }).type);
+        examples.set(`docs/sources/${file}`, types);
       }
     }
-    assert.ok(checked >= 7, `проверено примеров: ${checked}`);
+    for (const adapter of allAdapters()) {
+      assert.ok(examples.get(adapter.docs)?.has(adapter.type), `${adapter.docs}: нет примера источника типа ${adapter.type}`);
+    }
   });
 
   it('версии API можно не указывать; неверный формат и чужие поля сетей называются', () => {
@@ -478,14 +617,30 @@ describe('алерты для людей', () => {
     const err = new SourceError('auth', 'VK API 5: User authorization failed', '5');
     recordFailure(state, err, NOW - 20 * MINUTE);
     recordFailure(state, err, NOW - 10 * MINUTE);
-    const lines = formatFailureAlert(VK_SOURCE, state, err, { now: NOW, maxPostAgeHours: 48, runUrl: 'https://github.com/o/r/actions/runs/1' }).html.split('\n');
+    const lines = formatFailureAlert(VK_SOURCE, state, err, { now: NOW, maxPostAgeHours: 48, fetchLimit: 25, runUrl: 'https://github.com/o/r/actions/runs/1' }).html.split('\n');
     assert.equal(lines[0], '<b>VK</b>: посты не читаются, уже 20 мин.');
     assert.match(lines[1] ?? '', /^Что сделать: выпустите новый токен/);
-    assert.equal(lines[2], 'Посты, вышедшие за это время, придут после починки, если им будет меньше 48 ч.');
+    assert.equal(lines[2], 'Посты, вышедшие за это время, придут после починки, если им будет меньше 48 ч и их наберётся не больше 25.');
     assert.equal(lines[3], 'Причина: <code>auth</code> — VK API 5: User authorization failed');
     assert.equal(lines[4], '<a href="https://github.com/o/r/actions/runs/1">Лог запуска</a>');
     recordSuccess(state);
     assert.equal(state.failingSince, undefined, 'успех закрывает серию');
+  });
+
+  it('сбой, начавшийся до появления failingSince, считается запусками, а не «уже 1 мин»', () => {
+    const state = { ...newSourceState(NOW - 5 * HOUR), consecutiveFailures: 3 };
+    const err = new SourceError('network', 'запрос не прошёл: таймаут');
+    recordFailure(state, err, NOW);
+    assert.equal(state.failingSince, undefined);
+    const first = formatFailureAlert(VK_SOURCE, state, err, { now: NOW, maxPostAgeHours: 48, fetchLimit: 25 }).html.split('\n')[0];
+    assert.equal(first, '<b>VK</b>: посты не читаются, сбоев подряд: 4.');
+    recordSuccess(state);
+    recordFailure(state, err, NOW + HOUR);
+    assert.equal(state.failingSince, NOW + HOUR, 'новая серия — с отметкой начала');
+  });
+
+  it('подсказка про конфиг называет и переменную RADAR_CONFIG', () => {
+    assert.match(failureHint('config', BLUESKY_SOURCE), /«bluesky» в конфиге \(radar\.config\.json или файл из переменной RADAR_CONFIG\)/);
   });
 
   it('начало серии сбоев в состоянии проверяется при чтении', () => {

@@ -78,6 +78,7 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
           message: formatFailureAlert(source, sourceState, error, {
             now,
             maxPostAgeHours: config.maxPostAgeHours,
+            fetchLimit: config.fetchLimit,
             ...(deps.runUrl ? { runUrl: deps.runUrl } : {}),
           }),
           onSent: () => markAlertSent(sourceState, now),

@@ -78,7 +78,8 @@ function parseItem(source: BlueskySource, item: unknown): Post | undefined {
   const publishedAt = postTime(record.createdAt, post.indexedAt);
   if (publishedAt === undefined) return undefined;
   const handle = author ? asString(author.handle) : undefined;
-  const profile = handle && HANDLE.test(handle) ? handle : did;
+  // `handle.invalid` AppView ставит, когда хэндл не подтверждён: ссылка с ним не откроется.
+  const profile = handle && handle !== 'handle.invalid' && HANDLE.test(handle) ? handle : did;
   return {
     sourceId: source.id,
     id: rkey,

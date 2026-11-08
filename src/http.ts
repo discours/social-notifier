@@ -33,18 +33,47 @@ export async function requestJson(
   }
 }
 
-/** Запрос с таймаутом; ответ — текстом. Сетевая ошибка — SourceError без адреса запроса. */
+/**
+ * Ответ больше этого не дочитывается. Посты за один опрос занимают килобайты,
+ * а ответ в сотни мегабайт от чужой ленты занял бы память и время всего запуска.
+ */
+export const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Запрос с таймаутом; ответ — текстом, `url` — адрес после перенаправлений
+ * (пустой у подделанного в тестах ответа). Сетевая ошибка — SourceError без
+ * адреса запроса.
+ */
 export async function readText(
   fetchFn: FetchLike,
   url: string,
   init: RequestInit = {},
   timeoutMs = REQUEST_TIMEOUT_MS,
-): Promise<{ status: number; text: string }> {
+): Promise<{ status: number; text: string; url: string }> {
   try {
     const res = await fetchFn(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
-    return { status: res.status, text: await res.text() };
+    return { status: res.status, text: await readBody(res, MAX_RESPONSE_BYTES), url: res.url };
   } catch (err) {
+    if (err instanceof SourceError) throw err;
     throw new SourceError('network', `запрос не прошёл: ${describeNetworkError(err)}`);
+  }
+}
+
+async function readBody(res: Response, maxBytes: number): Promise<string> {
+  if (!res.body) return '';
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let size = 0;
+  let text = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return text + decoder.decode();
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new SourceError('bad_response', `ответ больше ${maxBytes / 1024 / 1024} МБ, дальше не читается`);
+    }
+    text += decoder.decode(value, { stream: true });
   }
 }
 

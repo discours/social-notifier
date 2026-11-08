@@ -5,7 +5,7 @@ import type { ParsedPosts, Post } from '../types.ts';
 import { httpUrl, isPlausibleTime } from '../util.ts';
 import type { SourceAdapter, SourceBase, SourceContext } from './adapter.ts';
 import { collectPosts } from './parse.ts';
-import { blocks, childText, htmlToText, tagAttributes } from './xml.ts';
+import { blocks, childElement, childText, htmlToText, plainText, rootElement, tagAttributes, textContent, type XmlElement } from './xml.ts';
 
 /**
  * Лента RSS 2.0 или Atom 1.0: Mastodon (`https://mastodon.social/@имя.rss`),
@@ -54,14 +54,22 @@ export function feedUrl(value: unknown): string | undefined {
 }
 
 export async function fetchFeedPosts(source: FeedSource, ctx: SourceContext): Promise<ParsedPosts> {
-  const { status, text } = await readText(ctx.fetch, source.url, {
+  const { status, text, url } = await readText(ctx.fetch, source.url, {
     headers: { accept: 'application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8' },
   });
+  // fetch идёт за перенаправлением и на http: тогда ленту мог подменить кто угодно по пути.
+  if (url !== '' && !url.startsWith('https:')) throw new SourceError('config', 'лента перенаправила на адрес без https');
   if (status === 429) throw new SourceError('rate_limit', `лента ответила HTTP 429`);
   if (status === 401 || status === 403) throw new SourceError('permission', `лента ответила HTTP ${status}`);
   if (status === 404 || status === 410) throw new SourceError('config', `лента не найдена (HTTP ${status})`);
   if (status >= 400) throw new SourceError('http', `лента ответила HTTP ${status}`);
   return parseFeed(source, text, ctx.config.fetchLimit);
+}
+
+/** Запись ленты: пост, если разобралась, и время, если оно нашлось. */
+interface Entry {
+  post?: Post;
+  publishedAt?: number;
 }
 
 /**
@@ -70,48 +78,55 @@ export async function fetchFeedPosts(source: FeedSource, ctx: SourceContext): Pr
  * бы из памяти уже отправленные посты, и те пришли бы снова.
  */
 export function parseFeed(source: SourceBase, xml: string, limit: number): ParsedPosts {
-  const isAtom = /<feed[\s>]/.test(xml) && !/<rss[\s>]/.test(xml);
-  const items = isAtom ? blocks(xml, 'entry') : blocks(xml, 'item');
-  if (items.length === 0 && !/<(rss|feed|channel)[\s>]/.test(xml)) {
-    throw new SourceError('bad_response', 'по адресу ленты не RSS и не Atom');
-  }
-  const { posts, skipped } = collectPosts(
-    items,
-    (item) => (isAtom ? atomEntry(source, item) : rssItem(source, item)),
-    'Лента',
-  );
-  const newest = [...posts].sort((a, b) => b.publishedAt - a.publishedAt).slice(0, limit);
+  const root = rootElement(xml);
+  const isAtom = root === 'feed';
+  if (!isAtom && root !== 'rss' && root !== 'rdf:RDF') throw new SourceError('bad_response', 'по адресу ленты не RSS и не Atom');
+  const entries = blocks(xml, isAtom ? 'entry' : 'item').map((block) => (isAtom ? atomEntry(source, block) : rssItem(source, block)));
+  const { posts } = collectPosts(entries, (entry) => entry.post, 'Лента');
+  const newest = posts.sort((a, b) => b.publishedAt - a.publishedAt).slice(0, limit);
+  // Неразобранная запись считается, только если могла попасть в выдачу: старая
+  // запись без ссылки за пределами `limit` свежих ничего не теряет, а алерт
+  // из-за неё приходил бы раз в сутки, пока она в ленте.
+  const oldestKept = newest.length === limit ? (newest.at(-1)?.publishedAt ?? -Infinity) : -Infinity;
+  const skipped = entries.filter((e) => !e.post && (e.publishedAt === undefined || e.publishedAt >= oldestKept)).length;
   return { posts: newest, skipped };
 }
 
-function rssItem(source: SourceBase, item: string): Post | undefined {
-  const link = httpUrl(childText(item, 'link'));
-  const guid = childText(item, 'guid');
-  // Ссылка — `<link>`, а если её нет, `<guid>` с адресом (isPermaLink по умолчанию true).
-  const url = link ?? httpUrl(guid);
+function rssItem(source: SourceBase, item: string): Entry {
   const publishedAt = feedTime(childText(item, 'pubDate') ?? childText(item, 'dc:date'));
+  const guid = childText(item, 'guid');
+  // Ссылка — `<link>`, затем `<guid>` с адресом (isPermaLink по умолчанию true),
+  // затем файл выпуска из `<enclosure>`: у подкастов `<link>` часто нет.
+  const url = httpUrl(childText(item, 'link')) ?? httpUrl(guid) ?? httpUrl(tagAttributes(item, 'enclosure')[0]?.url);
   const id = entryId(guid || url);
-  if (!url || !id || publishedAt === undefined) return undefined;
-  return { sourceId: source.id, id, url, publishedAt, text: entryText(item, ['description']) };
+  if (!url || !id || publishedAt === undefined) return { publishedAt };
+  // В RSS заголовок — простой текст, описание — HTML. У Mastodon заголовка нет.
+  const text = plainText(childText(item, 'title') ?? '') || htmlToText(childText(item, 'description') ?? '');
+  return { publishedAt, post: { sourceId: source.id, id, url, publishedAt, text } };
 }
 
-function atomEntry(source: SourceBase, entry: string): Post | undefined {
+function atomEntry(source: SourceBase, entry: string): Entry {
   const links = tagAttributes(entry, 'link');
   const alternate = links.find((a) => a.rel === undefined || a.rel === 'alternate');
   const url = httpUrl(alternate?.href);
   const publishedAt = feedTime(childText(entry, 'published') ?? childText(entry, 'updated'));
   const id = entryId(childText(entry, 'id') || url);
-  if (!url || !id || publishedAt === undefined) return undefined;
-  return { sourceId: source.id, id, url, publishedAt, text: entryText(entry, ['summary', 'content']) };
+  if (!url || !id || publishedAt === undefined) return { publishedAt };
+  let text = '';
+  for (const tag of ['title', 'summary', 'content']) {
+    const element = childElement(entry, tag);
+    text = element ? atomText(element) : '';
+    if (text !== '') break;
+  }
+  return { publishedAt, post: { sourceId: source.id, id, url, publishedAt, text } };
 }
 
-/** Заголовок записи, а у лент без заголовков (Mastodon) — текст первого непустого из `bodyTags`. */
-function entryText(block: string, bodyTags: readonly string[]): string {
-  for (const tag of ['title', ...bodyTags]) {
-    const text = htmlToText(childText(block, tag) ?? '');
-    if (text !== '') return text;
-  }
-  return '';
+/** Текст Atom по атрибуту `type`: `text` (по умолчанию), `html` или `xhtml`. */
+function atomText(element: XmlElement): string {
+  const type = element.attrs.type ?? 'text';
+  if (type === 'html') return htmlToText(textContent(element.inner));
+  if (type === 'xhtml') return htmlToText(element.inner);
+  return plainText(textContent(element.inner));
 }
 
 function entryId(raw: string | undefined): string | undefined {
