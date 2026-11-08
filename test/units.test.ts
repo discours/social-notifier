@@ -59,6 +59,12 @@ describe('format', () => {
     assert.equal([...emoji].length, 10);
     assert.ok(!emoji.includes('�'));
   });
+  it('snippet: знак препинания перед «…» отброшен, хвост из одних знаков сохранён', () => {
+    assert.equal(snippet('Раз, два, три, четыре', 12), 'Раз, два…');
+    assert.equal(snippet('Раз: два — три; четыре', 12), 'Раз: два…');
+    assert.equal(snippet('Она выбирает книгу, меняет закладку, наносит пометки и перечитывает главу'), 'Она выбирает книгу, меняет закладку, наносит…');
+    assert.equal(snippet(',,,,,,,,,,,,,,,,', 6), ',,,,,…');
+  });
   it('formatDigest: превью только у одиночного поста, текст и ссылка экранированы', () => {
     const post: Post = { sourceId: 'vk', id: '1', url: 'https://x.test/?a=1&b="2"', publishedAt: 0, text: '<script>' };
     const [single] = formatDigest(ru, 'Заголовок', [post], () => 'VK');

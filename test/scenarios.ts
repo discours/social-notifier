@@ -17,7 +17,7 @@ import type { Secrets } from '../src/env.ts';
 /** Конфиг «Дискурса» из radar.config.json; тест сверяет, что файл совпадает с ним. */
 export const DISCOURS_CONFIG = {
   language: 'ru',
-  messageTitle: 'Новые посты Дискурса, поддержим лайком и репостом:',
+  messageTitle: 'Давайте поддержим новые посты!',
   groupWindowMinutes: 10,
   maxPostAgeHours: 48,
   fetchLimit: 25,
@@ -25,9 +25,9 @@ export const DISCOURS_CONFIG = {
   vkApiVersion: '5.199',
   sources: [
     { id: 'vk', type: 'vk', label: 'VK', ownerId: -89236419 },
-    { id: 'instagram', type: 'instagram', label: 'Instagram', pageId: PAGE_ID },
-    { id: 'facebook', type: 'facebook', label: 'Facebook', pageId: PAGE_ID },
-    { id: 'youtube', type: 'youtube', label: 'YouTube', channelId: 'UCXEydGIYsqj-fjDnqAOXNNg' },
+    { id: 'instagram', type: 'instagram', label: 'IG', pageId: PAGE_ID },
+    { id: 'facebook', type: 'facebook', label: 'FB', pageId: PAGE_ID },
+    { id: 'youtube', type: 'youtube', label: 'YT', channelId: 'UCXEydGIYsqj-fjDnqAOXNNg' },
   ],
 };
 
