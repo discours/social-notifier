@@ -20,7 +20,7 @@ const dryRun = values['dry-run'] === true || process.env.RADAR_DRY_RUN === '1';
 
 async function main(): Promise<number> {
   const config = loadConfig(values.config);
-  if (!dryRun && (!secrets.telegramBotToken || !secrets.telegramChatId)) {
+  if (!dryRun && (!secrets.TELEGRAM_BOT_TOKEN || !secrets.TELEGRAM_CHAT_ID)) {
     log('не заданы секреты TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID: отправлять некуда');
     return 1;
   }

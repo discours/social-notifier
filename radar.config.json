@@ -8,6 +8,7 @@
   "sources": [
     { "id": "vk", "type": "vk", "label": "VK", "ownerId": -89236419 },
     { "id": "instagram", "type": "instagram", "label": "Instagram", "pageId": "1430627470564984" },
-    { "id": "facebook", "type": "facebook", "label": "Facebook", "pageId": "1430627470564984" }
+    { "id": "facebook", "type": "facebook", "label": "Facebook", "pageId": "1430627470564984" },
+    { "id": "youtube", "type": "youtube", "label": "YouTube", "channelId": "UCXEydGIYsqj-fjDnqAOXNNg" }
   ]
 }

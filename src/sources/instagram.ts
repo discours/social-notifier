@@ -1,9 +1,26 @@
 import { SourceError } from '../errors.ts';
-import type { InstagramSource, ParsedPosts, Post } from '../types.ts';
+import type { ParsedPosts, Post } from '../types.ts';
 import { asString, httpUrl, isRecord, parseGraphTime } from '../util.ts';
-import type { SourceContext } from './context.ts';
-import { graphGet } from './meta.ts';
+import type { SourceAdapter, SourceContext } from './adapter.ts';
+import { graphGet, parsePageId, type MetaPageSource } from './meta.ts';
 import { collectPosts } from './parse.ts';
+
+/** Профессиональный аккаунт Instagram; `pageId` — страница Facebook, к которой он привязан. */
+export interface InstagramSource extends MetaPageSource {
+  type: 'instagram';
+}
+
+export const instagramAdapter: SourceAdapter<InstagramSource> = {
+  type: 'instagram',
+  network: 'Instagram',
+  secrets: ['META_TOKEN'],
+  docs: 'docs/sources/meta.md',
+  parse(raw, base, issues) {
+    const pageId = parsePageId(raw, issues);
+    return pageId === undefined ? undefined : { ...base, type: 'instagram', pageId };
+  },
+  fetch: fetchInstagramPosts,
+};
 
 /**
  * Instagram читается через Graph API: сначала у страницы Facebook берётся

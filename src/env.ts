@@ -1,22 +1,28 @@
-import type { Secrets } from './types.ts';
+/** Секреты Telegram: куда отправлять посты и алерты. */
+export const TELEGRAM_SECRETS = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'TELEGRAM_ALERT_CHAT_ID'] as const;
+
+/**
+ * Секреты сетей. Новый секрет добавляется сюда, в `secrets` адаптера и в `env`
+ * шагов обоих workflow (radar.yml, probe.yml); тест проверяет, что ни одно из
+ * трёх мест не забыто.
+ */
+export const SOURCE_SECRETS = ['VK_TOKEN', 'META_TOKEN', 'YOUTUBE_API_KEY', 'X_BEARER_TOKEN'] as const;
+
+export type TelegramSecret = (typeof TELEGRAM_SECRETS)[number];
+export type SourceSecret = (typeof SOURCE_SECRETS)[number];
+export type SecretName = TelegramSecret | SourceSecret;
+
+/** Секреты по имени переменной окружения; незаданного нет в объекте. */
+export type Secrets = Partial<Record<SecretName, string>>;
+
+export const ALL_SECRETS: readonly SecretName[] = [...TELEGRAM_SECRETS, ...SOURCE_SECRETS];
 
 /** Секреты из переменных окружения. Пустая строка считается незаданной. */
 export function readSecrets(env: NodeJS.ProcessEnv): Secrets {
-  const read = (name: string): string | undefined => {
-    const value = env[name]?.trim();
-    return value ? value : undefined;
-  };
   const secrets: Secrets = {};
-  const pairs: [keyof Secrets, string][] = [
-    ['telegramBotToken', 'TELEGRAM_BOT_TOKEN'],
-    ['telegramChatId', 'TELEGRAM_CHAT_ID'],
-    ['telegramAlertChatId', 'TELEGRAM_ALERT_CHAT_ID'],
-    ['vkToken', 'VK_TOKEN'],
-    ['metaToken', 'META_TOKEN'],
-  ];
-  for (const [key, name] of pairs) {
-    const value = read(name);
-    if (value !== undefined) secrets[key] = value;
+  for (const name of ALL_SECRETS) {
+    const value = env[name]?.trim();
+    if (value) secrets[name] = value;
   }
   return secrets;
 }

@@ -21,11 +21,15 @@ export interface SourceState {
   /** Последние известные ID постов, новые в начале. */
   seen: string[];
   consecutiveFailures: number;
+  /** Первый сбой текущей серии: по нему алерт говорит, как давно источник не читается. */
+  failingSince?: number;
   lastError?: { kind: FailureKind; code?: string; message: string; at: number };
   /** Когда последний раз доставлен алерт о поломке этого источника. */
   alertedAt?: number;
   /** Алерт доставлен, а «снова отвечает» — ещё нет. */
   alertOpen?: true;
+  /** Последний алерт был о частичном сбое: если источник ляжет целиком, алерт повторится сразу. */
+  alertedPartial?: true;
   /** Когда запуск последний раз покраснел из-за алерта по этому источнику. */
   alertRedAt?: number;
 }
@@ -111,9 +115,11 @@ export function parseState(text: string): RadarState {
       !source.seen.every((s) => typeof s === 'string') ||
       !isCount(source.consecutiveFailures) ||
       !isOptionalTime(source.watchingSince) ||
+      !isOptionalTime(source.failingSince) ||
       !isOptionalTime(source.alertedAt) ||
       !isOptionalTime(source.alertRedAt) ||
       !(source.alertOpen === undefined || source.alertOpen === true) ||
+      !(source.alertedPartial === undefined || source.alertedPartial === true) ||
       !(source.lastError === undefined || isRecord(source.lastError))
     ) {
       throw new Error(`файл состояния повреждён: источник ${id}`);

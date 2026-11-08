@@ -71,8 +71,13 @@ jobs:
           TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
           VK_TOKEN: ${{ secrets.VK_TOKEN }}
           META_TOKEN: ${{ secrets.META_TOKEN }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           RADAR_DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
-        run: node src/main.ts --state state-store/state.json
+          # Форк держит свой конфиг в своём файле: тогда обновления через
+          # Sync fork не конфликтуют с конфигом оригинала.
+          RADAR_CONFIG: ${{ vars.RADAR_CONFIG || 'radar.config.json' }}
+        run: node src/main.ts --config "$RADAR_CONFIG" --state state-store/state.json
 
       # always(): красный запуск (алерт) тоже меняет состояние — отметку алерта
       # и счётчики сбоев, их надо сохранить.

@@ -20,15 +20,26 @@ export function parseGraphTime(value: unknown): number | undefined {
 }
 
 /**
- * Ссылка из ответа API, если это настоящий http(s)-адрес: в нормализованном
- * виде (`URL.href`). Пустая строка, `javascript:` и прочее — undefined, и
- * адаптер берёт запасную ссылку.
+ * Длиннее ссылка не бывает в настоящем посте. Ссылка уходит в сообщение
+ * Telegram, и сообщение, которое он не примет, встало бы первым в очереди
+ * всех сетей.
+ */
+export const MAX_URL_LENGTH = 2048;
+
+/**
+ * Ссылка из ответа API, если это настоящий http(s)-адрес не длиннее
+ * MAX_URL_LENGTH: в нормализованном виде (`URL.href`). Пустая строка,
+ * `javascript:` и прочее — undefined, и адаптер берёт запасную ссылку.
  */
 export function httpUrl(value: unknown): string | undefined {
-  if (typeof value !== 'string' || value === '') return undefined;
+  // Длина — до разбора: разбор punycode в URL квадратичен по длине имени
+  // хоста, и ссылка в сотни килобайт останавливала бы опрос на секунды.
+  if (typeof value !== 'string' || value === '' || value.length > MAX_URL_LENGTH) return undefined;
   try {
     const url = new URL(value);
-    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : undefined;
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined;
+    // Кириллица и пробелы при нормализации кодируются и удлиняют адрес.
+    return url.href.length <= MAX_URL_LENGTH ? url.href : undefined;
   } catch {
     return undefined;
   }

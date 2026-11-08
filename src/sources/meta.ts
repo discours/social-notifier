@@ -1,9 +1,25 @@
 import { SourceError, type FailureKind } from '../errors.ts';
 import { requestJson } from '../http.ts';
 import { asString, isRecord } from '../util.ts';
-import type { SourceContext } from './context.ts';
+import type { ConfigIssues, SourceBase, SourceContext } from './adapter.ts';
 
 export const GRAPH_ORIGIN = 'https://graph.facebook.com';
+
+/** Источник Meta: страница Facebook или привязанный к ней Instagram. */
+export interface MetaPageSource extends SourceBase {
+  /** Классический ID страницы Facebook (тот, что видит Graph API). */
+  pageId: string;
+}
+
+// ID страницы подставляется в путь запроса, поэтому только цифры.
+const PAGE_ID = /^\d{5,25}$/;
+
+export function parsePageId(raw: Record<string, unknown>, issues: ConfigIssues): string | undefined {
+  const pageId = raw.pageId;
+  if (typeof pageId === 'string' && PAGE_ID.test(pageId)) return pageId;
+  issues.add('pageId', 'строка из цифр (ID страницы Facebook)');
+  return undefined;
+}
 
 /**
  * GET к Graph API. Токен передаётся только в заголовке Authorization, не в адресе.
@@ -13,7 +29,7 @@ export async function graphGet(
   ctx: SourceContext,
   path: string,
   params: Record<string, string>,
-  token: string | undefined = ctx.secrets.metaToken,
+  token: string | undefined = ctx.secrets.META_TOKEN,
 ): Promise<Record<string, unknown>> {
   if (!token) throw new SourceError('config', 'не задан секрет META_TOKEN');
   const url = new URL(`${GRAPH_ORIGIN}/${ctx.config.graphApiVersion}/${path}`);

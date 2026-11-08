@@ -1,15 +1,36 @@
 import { SourceError, type FailureKind } from '../errors.ts';
 import { requestJson } from '../http.ts';
-import type { ParsedPosts, Post, VkSource } from '../types.ts';
+import type { ParsedPosts, Post } from '../types.ts';
 import { asString, isPlausibleTime, isRecord } from '../util.ts';
-import type { SourceContext } from './context.ts';
+import { requireSecret, type SourceAdapter, type SourceBase, type SourceContext } from './adapter.ts';
 import { collectPosts } from './parse.ts';
 
 export const VK_WALL_GET_URL = 'https://api.vk.com/method/wall.get';
 
+export interface VkSource extends SourceBase {
+  type: 'vk';
+  /** ID стены. У сообщества он отрицательный: -89236419. */
+  ownerId: number;
+}
+
+export const vkAdapter: SourceAdapter<VkSource> = {
+  type: 'vk',
+  network: 'VK',
+  secrets: ['VK_TOKEN'],
+  docs: 'docs/sources/vk.md',
+  parse(raw, base, issues) {
+    const ownerId = raw.ownerId;
+    if (typeof ownerId !== 'number' || !Number.isSafeInteger(ownerId) || ownerId === 0) {
+      issues.add('ownerId', 'целое число, у сообщества отрицательное');
+      return undefined;
+    }
+    return { ...base, type: 'vk', ownerId };
+  },
+  fetch: fetchVkPosts,
+};
+
 export async function fetchVkPosts(source: VkSource, ctx: SourceContext): Promise<ParsedPosts> {
-  const token = ctx.secrets.vkToken;
-  if (!token) throw new SourceError('config', 'не задан секрет VK_TOKEN');
+  const token = requireSecret(ctx, 'VK_TOKEN');
   // Токен уходит в теле POST-запроса, а не в URL.
   const form = new URLSearchParams({
     owner_id: String(source.ownerId),
