@@ -1,8 +1,14 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { FailureKind } from './errors.ts';
+import { LocalizedError, type Phrase } from './i18n/index.ts';
 import type { PendingPost } from './types.ts';
 import { isRecord } from './util.ts';
+
+/** «Файл состояния повреждён: …» на языке, которым его покажет вызывающий. */
+function corrupted(detail: Phrase): LocalizedError {
+  return new LocalizedError((t) => t.state.corrupted(detail(t)));
+}
 
 export const STATE_VERSION = 1;
 /** Сколько последних ID поста помнить по каждому источнику. */
@@ -63,7 +69,7 @@ export function emptyState(): RadarState {
  * бы прототип; конфиг такие id и так отклоняет, здесь вторая линия.
  */
 export function sourceStateOf(state: RadarState, id: string, now: number): SourceState {
-  if (id in Object.prototype) throw new Error(`недопустимый id источника: ${id}`);
+  if (id in Object.prototype) throw new LocalizedError((t) => t.state.invalidSourceId(id));
   if (!Object.hasOwn(state.sources, id)) state.sources[id] = newSourceState(now);
   return state.sources[id] as SourceState;
 }
@@ -99,13 +105,13 @@ export function parseState(text: string): RadarState {
   try {
     raw = JSON.parse(text);
   } catch {
-    throw new Error('файл состояния повреждён: не JSON');
+    throw corrupted((t) => t.state.notJson);
   }
   if (!isRecord(raw) || raw.version !== STATE_VERSION) {
-    throw new Error(`файл состояния повреждён: ожидается version ${STATE_VERSION}`);
+    throw corrupted((t) => t.state.expectedVersion(STATE_VERSION));
   }
   if (!isRecord(raw.sources) || !Array.isArray(raw.pending)) {
-    throw new Error('файл состояния повреждён: нет sources или pending');
+    throw corrupted((t) => t.state.noSourcesOrPending);
   }
   for (const [id, source] of Object.entries(raw.sources)) {
     if (
@@ -122,7 +128,7 @@ export function parseState(text: string): RadarState {
       !(source.alertedPartial === undefined || source.alertedPartial === true) ||
       !(source.lastError === undefined || isRecord(source.lastError))
     ) {
-      throw new Error(`файл состояния повреждён: источник ${id}`);
+      throw corrupted((t) => t.state.source(id));
     }
   }
   for (const post of raw.pending) {
@@ -135,16 +141,16 @@ export function parseState(text: string): RadarState {
       !Number.isFinite(post.publishedAt) ||
       !Number.isFinite(post.detectedAt)
     ) {
-      throw new Error('файл состояния повреждён: пост в очереди');
+      throw corrupted((t) => t.state.pendingPost);
     }
   }
   if (
     raw.telegram !== undefined &&
     (!isRecord(raw.telegram) || !isCount(raw.telegram.consecutiveFailures) || !isOptionalTime(raw.telegram.redAt))
   ) {
-    throw new Error('файл состояния повреждён: telegram');
+    throw corrupted(() => 'telegram');
   }
-  if (!isOptionalTime(raw.keepaliveAt)) throw new Error('файл состояния повреждён: keepaliveAt');
+  if (!isOptionalTime(raw.keepaliveAt)) throw corrupted(() => 'keepaliveAt');
   return raw as unknown as RadarState;
 }
 

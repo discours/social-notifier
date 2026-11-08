@@ -1,4 +1,5 @@
 {
+  "language": "ru",
   "messageTitle": "Новые посты Дискурса, поддержим лайком и репостом:",
   "groupWindowMinutes": 10,
   "maxPostAgeHours": 48,

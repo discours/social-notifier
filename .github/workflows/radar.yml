@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Только показать в логе, что было бы отправлено, и не сохранять состояние'
+        description: 'Only show in the log what would be sent, without saving state'
         type: boolean
         default: false
 
@@ -21,7 +21,7 @@ concurrency:
 
 permissions:
   contents: write # запись в ветку state
-  actions: write # продление расписания, см. шаг «Не дать расписанию уснуть»
+  actions: write # продление расписания, см. шаг «Keep the schedule awake»
 
 jobs:
   radar:
@@ -37,7 +37,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Подключить ветку состояния
+      - name: Attach the state branch
         run: |
           # Код 2 — ветки нет (первый запуск); любой другой ненулевой — сбой сети
           # или доступа, и тогда новую ветку создавать нельзя. Имя — полное:
@@ -53,18 +53,18 @@ jobs:
             # Ветка есть, а файла нет — кто-то её почистил. Пустое состояние
             # здесь потеряло бы очередь, поэтому стоп, а не первый запуск.
             if [ ! -f state-store/state.json ]; then
-              echo "::error::в ветке state нет state.json; восстановите его или удалите ветку целиком"
+              echo "::error::the state branch has no state.json; restore it or delete the whole branch"
               exit 1
             fi
           elif [ "$code" -eq 2 ]; then
-            echo "ветки state ещё нет, первый запуск создаст её"
+            echo "no state branch yet, the first run will create it"
             git worktree add --quiet --orphan -b state state-store
           else
-            echo "::error::не удалось проверить ветку state (git ls-remote, код $code)"
+            echo "::error::could not check the state branch (git ls-remote, exit code $code)"
             exit 1
           fi
 
-      - name: Радар
+      - name: Radar
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -81,17 +81,17 @@ jobs:
 
       # always(): красный запуск (алерт) тоже меняет состояние — отметку алерта
       # и счётчики сбоев, их надо сохранить.
-      - name: Сохранить состояние
+      - name: Save state
         if: always() && !inputs.dry_run
         working-directory: state-store
         run: |
           if [ ! -f state.json ]; then
-            echo "state.json не создан, сохранять нечего"
+            echo "state.json was not created, nothing to save"
             exit 0
           fi
           git add state.json
           if git diff --cached --quiet; then
-            echo "состояние не изменилось"
+            echo "state has not changed"
             exit 0
           fi
           git -c user.name='github-actions[bot]' \
@@ -104,7 +104,7 @@ jobs:
       # уточняет. Две страховки без гарантии: коммиты в ветку state (при новых
       # постах и раз в 25 дней) и повторное включение workflow через API.
       # Сбой шага не красит запуск, но виден в логе.
-      - name: Не дать расписанию уснуть
+      - name: Keep the schedule awake
         if: always() && github.event_name == 'schedule'
         continue-on-error: true
         env:

@@ -1,5 +1,6 @@
 import type { Secrets, SourceSecret } from '../env.ts';
 import { SourceError } from '../errors.ts';
+import type { Phrase } from '../i18n/index.ts';
 import type { FetchLike } from '../http.ts';
 import type { ParsedPosts } from '../types.ts';
 
@@ -39,8 +40,8 @@ export interface SourceContext {
 
 /** Куда адаптер складывает ошибки разбора своих полей конфига. */
 export interface ConfigIssues {
-  /** Ошибка поля источника: в сообщении станет `sources[2].handle: …`. */
-  add(field: string, message: string): void;
+  /** Ошибка поля источника: в сообщении станет `sources[2].handle: …`. Текст — из `t.config.fields`. */
+  add(field: string, message: Phrase): void;
 }
 
 /**
@@ -68,6 +69,6 @@ export interface SourceAdapter<S extends SourceBase & { type: string }> {
 /** Секрет адаптера или ошибка настройки, если он не задан. */
 export function requireSecret(ctx: SourceContext, name: SourceSecret): string {
   const value = ctx.secrets[name];
-  if (!value) throw new SourceError('config', `не задан секрет ${name}`);
+  if (!value) throw new SourceError('config', (t) => t.errors.secretMissing(name));
   return value;
 }

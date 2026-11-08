@@ -1,5 +1,6 @@
-import type { FailureKind, SourceError } from './errors.ts';
+import type { FailureKind, FailureRecord } from './errors.ts';
 import { escapeHtml, type OutgoingMessage } from './format.ts';
+import type { Texts } from './i18n/index.ts';
 import { adapterFor, type SourceConfig } from './sources/index.ts';
 import type { SourceState } from './state.ts';
 
@@ -15,9 +16,10 @@ export const REALERT_AFTER_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Отмечает неудачу. Возвращает true, если пора слать алерт. `partial` —
- * ответ разобрался не целиком, и разобранные посты идут дальше.
+ * ответ разобрался не целиком, и разобранные посты идут дальше. Текст ошибки
+ * сохраняется на языке конфига.
  */
-export function recordFailure(state: SourceState, err: SourceError, now: number, partial = false): boolean {
+export function recordFailure(state: SourceState, err: FailureRecord, now: number, partial = false): boolean {
   // Начало серии известно, только если серия началась при этой версии: у
   // сбоя, тянущегося с прошлой версии, поля нет, и алерт считает запуски.
   if (state.consecutiveFailures === 0) state.failingSince = now;
@@ -74,59 +76,26 @@ export function markRecoverySent(state: SourceState): void {
 }
 
 /** Секреты источника в тексте: `VK_TOKEN`, `A и B`; пустая строка — сеть без ключа. */
-export function secretsOf(source: SourceConfig): string {
-  return adapterFor(source).secrets.join(' и ');
+export function secretsOf(source: SourceConfig, t: Texts): string {
+  return t.list(adapterFor(source).secrets);
 }
 
-const SECRETS_PLACE = 'в настройках репозитория (Settings → Secrets and variables → Actions)';
-
 /** Что делать человеку: первое слово — действие, без кода ошибки. */
-export function failureHint(kind: FailureKind, source: SourceConfig): string {
-  const secret = secretsOf(source);
-  const network = adapterFor(source).network;
-  switch (kind) {
-    case 'auth':
-      return secret
-        ? `выпустите новый токен и обновите секрет ${secret} ${SECRETS_PLACE}.`
-        : `проверьте, что аккаунт открыт: ${network} перестал отдавать его посты без входа.`;
-    case 'permission':
-      return secret
-        ? `проверьте права токена ${secret} и его доступ к аккаунту.`
-        : 'проверьте, что аккаунт открыт и не заблокирован.';
-    case 'billing':
-      return `пополните баланс или проверьте тариф в кабинете разработчика ${network}.`;
-    case 'rate_limit':
-      return 'обычно ничего: сеть просит обращаться реже, и это проходит само. Если алерт повторится через сутки, сделайте опрос реже — строка cron в .github/workflows/radar.yml.';
-    case 'config':
-      return `проверьте источник «${source.id}» в конфиге (radar.config.json или файл из переменной RADAR_CONFIG)${secret ? ` и секрет ${secret}` : ''}.`;
-    case 'network':
-    case 'http':
-      return 'обычно ничего: сбой на стороне сети проходит сам. Если алерт повторится через сутки, откройте лог запуска.';
-    case 'bad_response':
-      return 'откройте лог запуска: ответ сети не разобрался, подробности — в причине ниже. Если сеть поменяла формат ответа, коду нужна правка.';
-  }
+export function failureHint(kind: FailureKind, source: SourceConfig, t: Texts): string {
+  return t.hint[kind]({ secret: secretsOf(source, t), network: adapterFor(source).network, sourceId: source.id });
 }
 
 /** «20 мин», «3 ч», «2 дня» — сколько длится сбой. */
-export function formatDuration(ms: number): string {
+export function formatDuration(ms: number, t: Texts): string {
   const minutes = Math.max(1, Math.round(ms / 60_000));
-  if (minutes < 60) return `${minutes} мин`;
+  if (minutes < 60) return t.duration.minutes(minutes);
   const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours} ч`;
-  const days = Math.floor(hours / 24);
-  return `${days} ${plural(days, 'день', 'дня', 'дней')}`;
-}
-
-function plural(n: number, one: string, few: string, many: string): string {
-  const tens = n % 100;
-  const units = n % 10;
-  if (tens >= 11 && tens <= 14) return many;
-  if (units === 1) return one;
-  if (units >= 2 && units <= 4) return few;
-  return many;
+  if (hours < 48) return t.duration.hours(hours);
+  return t.duration.days(Math.floor(hours / 24));
 }
 
 export interface AlertContext {
+  t: Texts;
   now: number;
   /** Порог свежести из конфига: посты старше после починки не придут. */
   maxPostAgeHours: number;
@@ -140,25 +109,25 @@ export interface AlertContext {
 /**
  * Алерт о сбое: сначала что сломалось и как давно, затем что сделать, что
  * будет с постами и только потом код ошибки — он для того, кто откроет лог.
+ * Тексты каталога экранируются, как и всё остальное: разметку ставит только этот код.
  */
-export function formatFailureAlert(source: SourceConfig, state: SourceState, err: SourceError, ctx: AlertContext): OutgoingMessage {
+export function formatFailureAlert(source: SourceConfig, state: SourceState, err: FailureRecord, ctx: AlertContext): OutgoingMessage {
+  const { t } = ctx;
+  const partial = ctx.partial === true;
   const since =
     state.failingSince === undefined
-      ? `сбоев подряд: ${state.consecutiveFailures}`
-      : `уже ${formatDuration(ctx.now - state.failingSince)}`;
-  const range = `из последних ${ctx.fetchLimit} и не старше ${ctx.maxPostAgeHours} ч`;
+      ? { failures: state.consecutiveFailures }
+      : { duration: formatDuration(ctx.now - state.failingSince, t) };
   const lines = [
-    `<b>${escapeHtml(source.label)}</b>: ${ctx.partial ? 'часть постов не читается' : 'посты не читаются'}, ${since}.`,
-    `Что сделать: ${escapeHtml(failureHint(err.kind, source))}`,
-    ctx.partial
-      ? `Разобранные посты приходят как обычно. Остальные придут после починки, если окажутся ${range}.`
-      : `Посты, вышедшие за это время, придут после починки — ${range}.`,
-    `Причина: <code>${err.kind}</code> — ${escapeHtml(err.message)}`,
+    `<b>${escapeHtml(source.label)}</b>: ${escapeHtml(t.alert.headline(partial, since))}`,
+    escapeHtml(t.alert.whatToDo(failureHint(err.kind, source, t))),
+    escapeHtml(t.alert.postsAfterFix(partial, ctx.fetchLimit, ctx.maxPostAgeHours)),
+    `${escapeHtml(t.alert.reason)}: <code>${escapeHtml(err.kind)}</code> — ${escapeHtml(err.message)}`,
   ];
-  if (ctx.runUrl) lines.push(`<a href="${escapeHtml(ctx.runUrl)}">Лог запуска</a>`);
+  if (ctx.runUrl) lines.push(`<a href="${escapeHtml(ctx.runUrl)}">${escapeHtml(t.alert.runLog)}</a>`);
   return { html: lines.join('\n'), disablePreview: true };
 }
 
-export function formatRecoveryNotice(source: SourceConfig): OutgoingMessage {
-  return { html: `<b>${escapeHtml(source.label)}</b>: посты снова читаются.`, disablePreview: true };
+export function formatRecoveryNotice(source: SourceConfig, t: Texts): OutgoingMessage {
+  return { html: `<b>${escapeHtml(source.label)}</b>: ${escapeHtml(t.alert.recovered)}`, disablePreview: true };
 }

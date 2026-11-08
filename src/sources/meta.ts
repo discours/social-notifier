@@ -17,7 +17,7 @@ const PAGE_ID = /^\d{5,25}$/;
 export function parsePageId(raw: Record<string, unknown>, issues: ConfigIssues): string | undefined {
   const pageId = raw.pageId;
   if (typeof pageId === 'string' && PAGE_ID.test(pageId)) return pageId;
-  issues.add('pageId', 'строка из цифр (ID страницы Facebook)');
+  issues.add('pageId', (t) => t.config.fields.metaPageId);
   return undefined;
 }
 
@@ -31,7 +31,7 @@ export async function graphGet(
   params: Record<string, string>,
   token: string | undefined = ctx.secrets.META_TOKEN,
 ): Promise<Record<string, unknown>> {
-  if (!token) throw new SourceError('config', 'не задан секрет META_TOKEN');
+  if (!token) throw new SourceError('config', (t) => t.errors.secretMissing('META_TOKEN'));
   const url = new URL(`${GRAPH_ORIGIN}/${ctx.config.graphApiVersion}/${path}`);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
 
@@ -41,15 +41,15 @@ export async function graphGet(
   if (isRecord(body) && isRecord(body.error)) {
     const code = Number(body.error.code);
     const subcode = asString(body.error.error_subcode);
-    const message = asString(body.error.message) ?? 'без описания';
+    const message = asString(body.error.message);
     throw new SourceError(
       classifyGraphError(code),
-      `Graph API ${code}${subcode ? `/${subcode}` : ''}: ${message}`,
+      (t) => `Graph API ${code}${subcode ? `/${subcode}` : ''}: ${message ?? t.errors.noDescription}`,
       String(code),
     );
   }
-  if (status >= 400) throw new SourceError('http', `Graph API ответил HTTP ${status}`);
-  if (!isRecord(body)) throw new SourceError('bad_response', 'ответ Graph API не объект');
+  if (status >= 400) throw new SourceError('http', (t) => t.errors.apiHttp('Graph API', status));
+  if (!isRecord(body)) throw new SourceError('bad_response', (t) => t.errors.notObject('Graph API'));
   return body;
 }
 

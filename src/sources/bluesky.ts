@@ -28,7 +28,7 @@ export const blueskyAdapter: SourceAdapter<BlueskySource> = {
   parse(raw, base, issues) {
     const handle = raw.handle;
     if (typeof handle !== 'string' || handle.length > 253 || !(HANDLE.test(handle) || DID.test(handle))) {
-      issues.add('handle', 'хэндл вида discours.bsky.social или DID вида did:plc:…');
+      issues.add('handle', (t) => t.config.fields.blueskyHandle);
       return undefined;
     }
     return { ...base, type: 'bluesky', handle };
@@ -52,12 +52,12 @@ export function parseBlueskyFeed(source: BlueskySource, status: number, body: un
     const message = isRecord(body) ? asString(body.message) : undefined;
     throw new SourceError(
       classifyBlueskyError(status, code, message),
-      `Bluesky ${code ?? `HTTP ${status}`}: ${message ?? 'без описания'}`,
+      (t) => `Bluesky ${code ?? `HTTP ${status}`}: ${message ?? t.errors.noDescription}`,
       code,
     );
   }
   const feed = isRecord(body) ? body.feed : undefined;
-  if (!Array.isArray(feed)) throw new SourceError('bad_response', 'в ответе Bluesky нет ленты');
+  if (!Array.isArray(feed)) throw new SourceError('bad_response', (t) => t.errors.blueskyNoFeed);
   // Репост — чужой пост в ленте профиля: не наш и не повод звать на лайк.
   const own = feed.filter((item) => !(isRecord(item) && isRecord(item.reason) && item.reason.$type === REPOST));
   return collectPosts(own, (item) => parseItem(source, item), 'Bluesky');

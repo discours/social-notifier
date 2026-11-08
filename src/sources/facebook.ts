@@ -31,10 +31,7 @@ export async function fetchFacebookPosts(source: FacebookSource, ctx: SourceCont
   const page = await graphGet(ctx, source.pageId, { fields: 'access_token' });
   const pageToken = asString(page.access_token);
   if (!pageToken) {
-    throw new SourceError(
-      'permission',
-      `Graph API не выдал токен страницы ${source.pageId}: страница не назначена владельцу META_TOKEN`,
-    );
+    throw new SourceError('permission', (t) => t.errors.facebookNoPageToken(source.pageId));
   }
   const body = await graphGet(
     ctx,
@@ -47,7 +44,7 @@ export async function fetchFacebookPosts(source: FacebookSource, ctx: SourceCont
 
 export function parseFacebookPosts(source: FacebookSource, body: Record<string, unknown>): ParsedPosts {
   const data = body.data;
-  if (!Array.isArray(data)) throw new SourceError('bad_response', 'в ответе Facebook нет списка постов');
+  if (!Array.isArray(data)) throw new SourceError('bad_response', (t) => t.errors.noPostList('Facebook'));
   return collectPosts(
     data,
     (item): Post | undefined => {

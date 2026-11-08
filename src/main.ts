@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 import { loadConfig } from './config.ts';
 import { readSecrets, runUrlFromEnv, secretValues } from './env.ts';
+import { DEFAULT_LANGUAGE, describe, textsFor, type Texts } from './i18n/index.ts';
 import { runRadar } from './radar.ts';
 import { loadState, saveState } from './state.ts';
 import { makeRedactor } from './util.ts';
@@ -14,14 +15,18 @@ const { values } = parseArgs({
 });
 
 const secrets = readSecrets(process.env);
-const redact = makeRedactor(secretValues(secrets));
+// До чтения конфига язык неизвестен: сбой чтения пишется языком по умолчанию.
+let t: Texts = textsFor(DEFAULT_LANGUAGE);
+let redact = makeRedactor(secretValues(secrets), t.redacted);
 const log = (line: string) => console.log(redact(line));
 const dryRun = values['dry-run'] === true || process.env.RADAR_DRY_RUN === '1';
 
 async function main(): Promise<number> {
   const config = loadConfig(values.config);
+  t = textsFor(config.language);
+  redact = makeRedactor(secretValues(secrets), t.redacted);
   if (!dryRun && (!secrets.TELEGRAM_BOT_TOKEN || !secrets.TELEGRAM_CHAT_ID)) {
-    log('не заданы секреты TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID: отправлять некуда');
+    log(t.log.nothingToSendTo);
     return 1;
   }
   const state = loadState(values.state);
@@ -36,7 +41,7 @@ async function main(): Promise<number> {
     dryRun,
   });
   if (!dryRun) saveState(values.state, state);
-  log(`итог: постов отправлено ${result.postsSent}, алертов ${result.alertsSent}, код ${result.exitCode}`);
+  log(t.log.summary(result.postsSent, result.alertsSent, result.exitCode));
   return result.exitCode;
 }
 
@@ -45,7 +50,7 @@ main().then(
     process.exitCode = code;
   },
   (err: unknown) => {
-    log(`сбой запуска: ${err instanceof Error ? err.message : String(err)}`);
+    log(t.log.runFailed(describe(err, t)));
     process.exitCode = 1;
   },
 );

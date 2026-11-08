@@ -1,3 +1,4 @@
+import type { Texts } from './i18n/index.ts';
 import type { Post } from './types.ts';
 import { wellFormed } from './util.ts';
 
@@ -12,7 +13,8 @@ export interface OutgoingMessage {
 
 /**
  * Экранирует текст для parse_mode HTML. Через неё проходит всё динамическое
- * содержимое сообщений, поэтому здесь же чинятся одиночные суррогаты.
+ * содержимое сообщений и все тексты каталога языков, поэтому здесь же чинятся
+ * одиночные суррогаты.
  */
 export function escapeHtml(text: string): string {
   return wellFormed(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -45,6 +47,7 @@ export interface DigestMessage extends OutgoingMessage {
  * показывается, только когда в сообщении один пост.
  */
 export function formatDigest(
+  t: Texts,
   title: string,
   posts: readonly Post[],
   labelOf: (sourceId: string) => string,
@@ -55,7 +58,7 @@ export function formatDigest(
   let current: { html: string; posts: Post[] } = { html: header, posts: [] };
   for (const post of posts) {
     const label = escapeHtml(labelOf(post.sourceId));
-    const text = escapeHtml(snippet(post.text) || 'пост без подписи');
+    const text = escapeHtml(snippet(post.text) || t.digest.untitledPost);
     const line = `\n<b>${label}</b>: <a href="${escapeHtml(post.url)}">${text}</a>`;
     if (current.posts.length > 0 && current.html.length + line.length > limit) {
       chunks.push(current);

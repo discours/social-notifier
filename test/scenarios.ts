@@ -345,8 +345,9 @@ async function healthScenarios(): Promise<ScenarioRecord[]> {
   return out;
 }
 
+// Конфиг-не-объект в эталон не входит: он не может назвать свой язык, и ошибка
+// о нём пишется языком по умолчанию (тест «язык конфига» в i18n.test.ts).
 const BAD_CONFIGS: { name: string; patch: (c: Record<string, unknown>) => unknown }[] = [
-  { name: 'не объект', patch: () => [] },
   { name: 'пустой заголовок', patch: (c) => ({ ...c, messageTitle: '  ' }) },
   { name: 'длинный заголовок', patch: (c) => ({ ...c, messageTitle: 'я'.repeat(257) }) },
   { name: 'числа вне пределов', patch: (c) => ({ ...c, groupWindowMinutes: 500, maxPostAgeHours: 0, fetchLimit: 'много' }) },

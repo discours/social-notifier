@@ -71,12 +71,18 @@ const MIN_SECRET_LENGTH = 6;
 // вернёт в тексте ошибки токен, которого нет в списке известных секретов.
 const TOKEN_LIKE = /[A-Za-z0-9_\-.]{40,}/g;
 
-/** Вычищает из текста известные секреты и всё, что похоже на токен. */
-export function makeRedactor(secrets: readonly (string | undefined)[]): (text: string) => string {
+/**
+ * Вычищает из текста известные секреты и всё, что похоже на токен. Метки
+ * замены — на языке конфига (`t.redacted`): они видны в алертах.
+ */
+export function makeRedactor(
+  secrets: readonly (string | undefined)[],
+  marks: { readonly secret: string; readonly hidden: string },
+): (text: string) => string {
   const known = secrets.filter((s): s is string => typeof s === 'string' && s.length >= MIN_SECRET_LENGTH);
   return (text) => {
     let out = text;
-    for (const secret of known) out = out.split(secret).join('[секрет]');
-    return out.replace(TOKEN_LIKE, '[скрыто]');
+    for (const secret of known) out = out.split(secret).join(marks.secret);
+    return out.replace(TOKEN_LIKE, marks.hidden);
   };
 }
