@@ -199,7 +199,8 @@ const CHAT_UPDATES = ['message', 'edited_message', 'channel_post', 'edited_chann
  * добавленный позже, в выборку не попадёт. Чат, откуда бота убрали, не
  * возвращается. Из выборки — до MAX_FOUND_CHATS чатов с самыми поздними
  * обновлениями; `truncated` — выборка полная, и более поздние обновления не видны.
- * Бот с webhook отвечает HTTP 409 — исключение TelegramError со статусом 409.
+ * Бот с webhook или с одновременным чужим опросом отвечает HTTP 409 —
+ * исключение TelegramError со статусом 409.
  */
 export async function findRecentChats(fetchFn: FetchLike, token: string): Promise<{ chats: FoundChat[]; truncated: boolean }> {
   const { status, result } = await callBotRaw(fetchFn, token, 'getUpdates', { timeout: 0, limit: UPDATES_LIMIT });

@@ -613,18 +613,22 @@ describe('проба', () => {
     assert.equal(await runProbe(probeDeps(mixed, en, undefined, { findChats: true }).deps), 1);
   });
 
-  it('поиск чатов говорит, что выборка полная и поздний чат мог в неё не попасть', async () => {
+  it('полная выборка названа в логе, и запуск красный: поздний чат мог в неё не попасть', async () => {
     for (const t of [en, ru]) {
-      // Оживлённая группа постов: сотня её обновлений занимает всю выборку.
+      // Оживлённая группа постов занимает почти всю сотню; новый чат в неё попал, но мог и не попасть.
       const busy = new FakeBot();
-      busy.updates = Array.from({ length: 100 }, () => channelPost(-100111222333));
+      busy.updates = [...Array.from({ length: 99 }, () => channelPost(-100111222333)), message(987654321, 'private')];
       const full = probeDeps(busy, t, undefined, { findChats: true });
-      assert.equal(await runProbe(full.deps), 0, full.lines.join('\n'));
+      assert.equal(await runProbe(full.deps), 1, full.lines.join('\n'));
       assert.ok(full.lines.includes(t.probe.chatsTruncated), full.lines.join('\n'));
+      assert.deepEqual(
+        busy.sent.map((sent) => sent.chatId),
+        ['987654321'],
+      );
       const calm = new FakeBot();
-      calm.updates = [channelPost(-100111222333)];
+      calm.updates = [channelPost(-100111222333), message(987654321, 'private')];
       const short = probeDeps(calm, t, undefined, { findChats: true });
-      await runProbe(short.deps);
+      assert.equal(await runProbe(short.deps), 0, short.lines.join('\n'));
       assert.ok(!short.lines.includes(t.probe.chatsTruncated), short.lines.join('\n'));
     }
   });
@@ -721,11 +725,16 @@ describe('проба', () => {
       assert.ok(lines.includes(`${t.probe.chatName(1, 'channel')}: ${t.probe.chatKnown('TELEGRAM_CHAT_ID')}`), lines.join('\n'));
       assert.ok(lines.includes(`${t.probe.chatName(2, 'private')}: ${t.probe.chatKnown('TELEGRAM_ALERT_CHAT_ID')}`), lines.join('\n'));
     }
-    // Все найденные чаты уже известны: писать некуда, но это не сбой.
+    // Все найденные чаты уже известны: нового нет — подсказка, как при пустой выборке, и код 1.
     const bot = new FakeBot();
     bot.updates = [channelPost(-100111222333)];
-    assert.equal(await runProbe(probeDeps(bot, en, undefined, { findChats: true }).deps), 0);
+    const known = probeDeps(bot, en, undefined, { findChats: true });
+    assert.equal(await runProbe(known.deps), 1);
     assert.deepEqual(bot.sent, []);
+    assert.ok(known.lines.includes(en.probe.chatsNone), known.lines.join('\n'));
+    // Числовой ID из секрета сравнивается как есть: getChat по чату, которого бот
+    // ещё не видит, ответил бы 400 и остановил бы поиск на самой настройке.
+    assert.ok(!bot.calls.some((call) => call.method === 'getChat'), JSON.stringify(bot.calls));
   });
 
   it('поиск чатов узнаёт чат постов, записанный по имени, и не пишет в него', async () => {
@@ -746,6 +755,13 @@ describe('проба', () => {
     assert.equal(await runProbe({ ...unknown.deps, secrets: { ...PROBE_SECRETS, TELEGRAM_CHAT_ID: '@no_such_name' } }), 1);
     assert.deepEqual(lost.sent, []);
     assert.ok(unknown.lines.some((line) => line.startsWith('TELEGRAM_CHAT_ID: ERROR')), unknown.lines.join('\n'));
+    // getChat ответил без числового ID — то же: никуда не пишем.
+    const odd = new FakeBot();
+    odd.names.set('@odd_name', Number.NaN);
+    odd.updates = [channelPost(-100111222333), message(987654321, 'private')];
+    const broken = probeDeps(odd, en, undefined, { findChats: true });
+    assert.equal(await runProbe({ ...broken.deps, secrets: { ...PROBE_SECRETS, TELEGRAM_CHAT_ID: '@odd_name' } }), 1);
+    assert.deepEqual(odd.sent, []);
   });
 
   it('find_chats и send_test сразу: идёт поиск чатов, а пропуск send_test назван в логе', async () => {

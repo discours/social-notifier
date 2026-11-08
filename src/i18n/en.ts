@@ -182,7 +182,7 @@ export const en: Texts = {
     crashed: (message) => `probe failed: ${message}`,
     chatsSection: '== Finding chats ==',
     chatsWebhook:
-      "Telegram does not return updates: this bot has a webhook, so another service receives its updates. Take the chat ID from that service's settings.",
+      "Telegram does not return updates: another service receives this bot's updates — through a webhook, or by polling at the same moment. Take the chat ID from that service's settings.",
     chatsNone:
       "no new chats: add the bot to a group or channel (to a channel as an admin allowed to post), send /start to the bot in a private chat and run the search again. Telegram keeps updates for 24 hours. If another service reads this bot's updates, take the chat ID from that service's settings.",
     chatsTruncated:
