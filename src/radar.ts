@@ -104,18 +104,27 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
     }
 
     if (!sourceState.bootstrapped) {
-      // Первый успешный опрос: посты до начала наблюдения — архив, его не шлём.
-      // Вышедшие позже (источник был сломан с первого запуска) идут как новые.
       sourceState.bootstrapped = true;
-      const since = sourceState.watchingSince ?? now;
-      const archive = posts.filter((p) => p.publishedAt < since);
-      rememberSeen(sourceState, archive.map((p) => p.id));
-      log(`${source.id}: первый успешный опрос, запомнено без уведомления: ${archive.length}`);
+      sourceState.watchingSince ??= now;
+      log(`${source.id}: первый успешный опрос`);
     }
 
+    // Посты, вышедшие до начала наблюдения, — архив: их не шлём, даже если радар
+    // видит их впервые (первый опрос, выросший fetchLimit, закреплённый старый
+    // пост). Вышедшие позже идут как новые, в том числе за время, пока источник
+    // был сломан с первого запуска. Без отметки начала наблюдения (состояние
+    // правили руками) архива нет: иначе «сейчас» проглотило бы каждый пост.
+    const since = sourceState.watchingSince;
     const known = new Set(sourceState.seen);
+    const unseen = posts.filter((p) => !known.has(p.id));
+    const archive = since === undefined ? [] : unseen.filter((p) => p.publishedAt < since);
+    if (archive.length > 0) {
+      log(`${source.id}: запомнено без уведомления, вышли до начала наблюдения: ${archive.length}`);
+    }
     const queued = new Set(state.pending.map(postKey));
-    const fresh = posts.filter((p) => !known.has(p.id)).sort((a, b) => a.publishedAt - b.publishedAt);
+    const fresh = unseen
+      .filter((p) => since === undefined || p.publishedAt >= since)
+      .sort((a, b) => a.publishedAt - b.publishedAt);
     const cutoff = now - config.maxPostAgeHours * HOUR;
     let added = 0;
     for (const post of fresh) {
@@ -129,7 +138,7 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
       state.pending.push({ ...post, detectedAt: now });
       added += 1;
     }
-    rememberSeen(sourceState, fresh.map((p) => p.id));
+    rememberSeen(sourceState, unseen.map((p) => p.id));
     log(`${source.id}: получено ${posts.length}, новых в очереди ${added}`);
   }
 
@@ -160,6 +169,7 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
   let telegramError: string | undefined;
   let postsSent = 0;
   let messagesSent = 0;
+  const delaysMin: number[] = [];
   // Посты снимаются с очереди после каждого доставленного сообщения: если
   // Telegram откажет посередине длинного дайджеста, повторится только остаток.
   for (const message of digest) {
@@ -176,8 +186,18 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
     state.pending = state.pending.filter((p) => !sent.has(postKey(p)));
     postsSent += message.posts.length;
     messagesSent += 1;
+    for (const post of message.posts) delaysMin.push(Math.round((now - post.publishedAt) / MINUTE));
   }
-  if (messagesSent > 0) log(`отправлено постов: ${postsSent}, сообщений: ${messagesSent}`);
+  if (messagesSent > 0) {
+    // Задержка от публикации до отправки — то, что видит редакция; по ней
+    // подбирают окно группировки и судят, не отстаёт ли расписание GitHub.
+    const low = Math.min(...delaysMin);
+    const high = Math.max(...delaysMin);
+    log(
+      `отправлено постов: ${postsSent}, сообщений: ${messagesSent}; ` +
+        `от публикации до отправки: ${low === high ? low : `${low}–${high}`} мин`,
+    );
+  }
 
   let alertsSent = 0;
   for (const alert of alerts) {

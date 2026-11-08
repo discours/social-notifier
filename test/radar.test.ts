@@ -128,6 +128,62 @@ describe('runRadar: группировка', () => {
     assert.equal(world.sent.length, 0);
     assert.ok(state.sources.vk?.seen.includes('50'), 'но запомнен, чтобы не всплыть снова');
   });
+
+  it('пост после начала наблюдения, впервые увиденный старше 48 ч, не присылается', async () => {
+    const { world, state } = await bootstrapped(); // наблюдение с T0 − 30 мин
+    world.addVk(101, T0, 'вышел, пока расписание стояло');
+    world.addVk(102, T0 + 48 * HOUR, 'свежий');
+
+    await runRadar(state, deps(world, T0 + 49 * HOUR)); // радар не запускался двое суток
+
+    const messages = world.postsMessages();
+    assert.equal(messages.length, 1);
+    assert.ok(messages[0]?.includes('wall-89236419_102"'), 'свежий прислан');
+    assert.ok(!messages[0]?.includes('wall-89236419_101"'), 'старше порога — нет');
+    assert.ok(state.sources.vk?.seen.includes('101'), 'но запомнен');
+  });
+
+  it('выросла выдача: пост до начала наблюдения не присылается, хотя радар видит его впервые', async () => {
+    const { world, state } = await bootstrapped(); // наблюдение с T0 − 30 мин
+    // Как после подъёма fetchLimit: в выдаче появился пост моложе 48 ч, но
+    // вышедший до начала наблюдения — о нём уже сообщали до радара.
+    world.vk.push({ id: 99, date: Math.floor((T0 - 6 * HOUR) / 1000), text: 'до начала наблюдения' });
+    world.addVk(101, T0, 'новый');
+
+    await runRadar(state, deps(world, T0 + 10 * MINUTE));
+
+    const messages = world.postsMessages();
+    assert.equal(messages.length, 1);
+    assert.ok(messages[0]?.includes('wall-89236419_101"'), 'новый пост прислан');
+    assert.ok(!messages[0]?.includes('wall-89236419_99"'), 'архив не прислан');
+    assert.ok(state.sources.vk?.seen.includes('99'), 'архив запомнен, чтобы не всплыть снова');
+  });
+
+  it('источник без отметки начала наблюдения присылает новые посты', async () => {
+    const { world, state } = await bootstrapped();
+    const vk = state.sources.vk;
+    assert.ok(vk);
+    delete vk.watchingSince; // состояние поправили руками
+    world.addVk(101, T0);
+
+    await runRadar(state, deps(world, T0 + 10 * MINUTE));
+
+    assert.equal(world.postsMessages().length, 1);
+  });
+
+  it('лог называет задержку от публикации до отправки', async () => {
+    const { world, state } = await bootstrapped();
+    world.addVk(101, T0);
+    world.addFb('1_2', T0 + 4 * MINUTE);
+    const lines: string[] = [];
+
+    await runRadar(state, deps(world, T0 + 12 * MINUTE, { log: (l) => lines.push(l) }));
+    world.addIg('9002', T0 + 20 * MINUTE);
+    await runRadar(state, deps(world, T0 + 30 * MINUTE, { log: (l) => lines.push(l) }));
+
+    assert.ok(lines.includes('отправлено постов: 2, сообщений: 1; от публикации до отправки: 8–12 мин'), lines.join('\n'));
+    assert.ok(lines.includes('отправлено постов: 1, сообщений: 1; от публикации до отправки: 10 мин'), lines.join('\n'));
+  });
 });
 
 describe('runRadar: алерты', () => {
