@@ -1,6 +1,6 @@
 import type { Texts } from './index.ts';
 
-/** English texts: the default for a config without `language`. */
+/** Английские тексты: язык по умолчанию для конфига без `language`. */
 const SECRETS_PLACE = 'in the repository settings (Settings → Secrets and variables → Actions)';
 
 const code = (value: string | undefined): string => (value ? ` (${value})` : '');
@@ -191,7 +191,7 @@ export const en: Texts = {
     chatReplied: 'ID sent there as a message',
     chatKnown: (secret) => `already saved in ${secret}, no message sent`,
     chatsSummary: (found, replied) =>
-      replied === 0 ? `chats found: ${found}, no ID sent` : `chats found: ${found}, ID sent to ${replied}: look for the bot's message in those chats`,
+      replied === 0 ? `chats found: ${found}, no ID sent` : `chats found: ${found}, ID sent to ${replied}: look for the bot's message in those chats and save the IDs to secrets — until then, every search writes there again`,
     testSkippedForChats: 'send_test skipped: the chat search runs on its own; run the probe with send_test once more',
     chatIdIntro: "This chat's ID:",
     chatIdHint:

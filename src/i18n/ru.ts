@@ -200,7 +200,7 @@ export const ru: Texts = {
     chatReplied: 'ID отправлен туда сообщением',
     chatKnown: (secret) => `уже записан в ${secret}, сообщение не отправлено`,
     chatsSummary: (found, replied) =>
-      replied === 0 ? `найдено чатов: ${found}, ID никуда не отправлен` : `найдено чатов: ${found}, ID отправлен в ${replied}: ищите сообщение бота в этих чатах`,
+      replied === 0 ? `найдено чатов: ${found}, ID никуда не отправлен` : `найдено чатов: ${found}, ID отправлен в ${replied}: ищите сообщение бота в этих чатах и сохраните ID в секреты — до этого каждый поиск пишет туда снова`,
     testSkippedForChats: 'send_test пропущен: поиск чатов идёт отдельно, запустите пробу с send_test ещё раз',
     chatIdIntro: 'ID этого чата:',
     chatIdHint:
