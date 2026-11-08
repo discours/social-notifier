@@ -1,8 +1,8 @@
 import type { FetchLike } from '../src/http.ts';
 import { parseConfig } from '../src/config.ts';
-import type { RadarConfig, Secrets } from '../src/types.ts';
+import type { RadarConfig } from '../src/types.ts';
 import { makeRedactor } from '../src/util.ts';
-import { secretValues } from '../src/env.ts';
+import { secretValues, type Secrets } from '../src/env.ts';
 
 export const PAGE_ID = '1430627470564984';
 export const IG_ID = '17841400000000001';
@@ -12,11 +12,13 @@ export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
 
 export const SECRETS: Secrets = {
-  telegramBotToken: '123456:TEST-bot-token-value',
-  telegramChatId: '-100111',
-  telegramAlertChatId: '222',
-  vkToken: 'vk1.a.test-vk-token-value',
-  metaToken: 'EAATestMetaTokenValue',
+  TELEGRAM_BOT_TOKEN: '123456:TEST-bot-token-value',
+  TELEGRAM_CHAT_ID: '-100111',
+  TELEGRAM_ALERT_CHAT_ID: '222',
+  VK_TOKEN: 'vk1.a.test-vk-token-value',
+  META_TOKEN: 'EAATestMetaTokenValue',
+  YOUTUBE_API_KEY: 'yt-test-key-value',
+  X_BEARER_TOKEN: 'x-test-bearer-value',
 };
 
 export const redact = makeRedactor(secretValues(SECRETS));
@@ -143,9 +145,9 @@ export class FakeWorld {
 
   /** Сообщения в основной чат (посты) и в чат алертов. */
   postsMessages(): string[] {
-    return this.sent.filter((m) => m.chatId === SECRETS.telegramChatId).map((m) => m.text);
+    return this.sent.filter((m) => m.chatId === SECRETS.TELEGRAM_CHAT_ID).map((m) => m.text);
   }
   alertMessages(): string[] {
-    return this.sent.filter((m) => m.chatId === SECRETS.telegramAlertChatId).map((m) => m.text);
+    return this.sent.filter((m) => m.chatId === SECRETS.TELEGRAM_ALERT_CHAT_ID).map((m) => m.text);
   }
 }

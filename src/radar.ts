@@ -14,7 +14,8 @@ import type { FetchLike } from './http.ts';
 import { fetchSourcePosts } from './sources/index.ts';
 import { rememberSeen, sourceStateOf, type RadarState } from './state.ts';
 import { sendTelegramMessage } from './telegram.ts';
-import type { ParsedPosts, RadarConfig, Secrets } from './types.ts';
+import type { Secrets } from './env.ts';
+import type { ParsedPosts, RadarConfig } from './types.ts';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -60,7 +61,6 @@ interface Alert {
 export async function runRadar(state: RadarState, deps: RadarDeps): Promise<RadarResult> {
   const { config, log } = deps;
   const now = deps.now();
-  const ctx = { config, secrets: deps.secrets, fetch: deps.fetch };
   const alerts: Alert[] = [];
   let alertRed = false;
 
@@ -75,7 +75,11 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
       if (shouldAlert) {
         if (claimAlertRed(sourceState, now)) alertRed = true;
         alerts.push({
-          message: formatFailureAlert(source, error, sourceState.consecutiveFailures, deps.runUrl),
+          message: formatFailureAlert(source, sourceState, error, {
+            now,
+            maxPostAgeHours: config.maxPostAgeHours,
+            ...(deps.runUrl ? { runUrl: deps.runUrl } : {}),
+          }),
           onSent: () => markAlertSent(sourceState, now),
         });
       }
@@ -83,7 +87,12 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
 
     let parsed: ParsedPosts;
     try {
-      parsed = await fetchSourcePosts(source, ctx);
+      parsed = await fetchSourcePosts(source, {
+        config,
+        secrets: deps.secrets,
+        fetch: deps.fetch,
+        known: sourceState.seen,
+      });
     } catch (err) {
       fail(toSourceError(err, deps.redact));
       continue;
@@ -159,10 +168,10 @@ export async function runRadar(state: RadarState, deps: RadarDeps): Promise<Rada
     return { exitCode: alertRed ? 1 : 0, postsSent: 0, alertsSent: 0 };
   }
 
-  const token = deps.secrets.telegramBotToken;
-  const chatId = deps.secrets.telegramChatId;
+  const token = deps.secrets.TELEGRAM_BOT_TOKEN;
+  const chatId = deps.secrets.TELEGRAM_CHAT_ID;
   if (!token || !chatId) throw new Error('не заданы секреты TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID');
-  const alertChatId = deps.secrets.telegramAlertChatId || chatId;
+  const alertChatId = deps.secrets.TELEGRAM_ALERT_CHAT_ID || chatId;
   const send = (chat: string, message: OutgoingMessage) =>
     sendTelegramMessage(deps.fetch, token, chat, message, deps.sleep);
 

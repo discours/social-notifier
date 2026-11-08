@@ -214,12 +214,12 @@ describe('runRadar: алерты', () => {
     await runRadar(state, deps(world, T0 + 25 * HOUR));
     const recovery = world.alertMessages().slice(4);
     assert.equal(recovery.length, 2);
-    assert.ok(recovery.every((m) => m.includes('снова отвечает')));
+    assert.ok(recovery.every((m) => m.includes('снова читаются')));
     assert.equal(state.sources.facebook?.consecutiveFailures, 0);
     assert.equal(state.sources.facebook?.alertOpen, undefined, 'уведомление о починке доставлено');
   });
 
-  it('мигающий источник: один алерт, одно «снова отвечает» и один красный запуск за сутки', async () => {
+  it('мигающий источник: один алерт, одно «снова читаются» и один красный запуск за сутки', async () => {
     const { world, state } = await bootstrapped();
     const broken = json({ error: { code: 2, message: 'Service temporarily unavailable' } }, 500);
     let reds = 0;
@@ -231,8 +231,8 @@ describe('runRadar: алерты', () => {
     }
     assert.equal(reds, 1);
     const alerts = world.alertMessages();
-    assert.equal(alerts.filter((m) => m.includes('не отвечает')).length, 2, 'по алерту на Instagram и Facebook');
-    assert.equal(alerts.filter((m) => m.includes('снова отвечает')).length, 2);
+    assert.equal(alerts.filter((m) => m.includes('не читаются')).length, 2, 'по алерту на Instagram и Facebook');
+    assert.equal(alerts.filter((m) => m.includes('снова читаются')).length, 2);
   });
 
   it('часть ответа не разобралась — разобранное доходит, а повтор даёт алерт', async () => {
@@ -301,16 +301,16 @@ describe('runRadar: алерты', () => {
 
   it('текст ошибки API с токеном не попадает ни в состояние, ни в алерт', async () => {
     const { world, state } = await bootstrapped();
-    world.fail.graph = json({ error: { code: 190, message: `Malformed access token ${SECRETS.metaToken}` } }, 400);
+    world.fail.graph = json({ error: { code: 190, message: `Malformed access token ${SECRETS.META_TOKEN}` } }, 400);
 
     await runRadar(state, deps(world, T0));
     await runRadar(state, deps(world, T0 + 10 * MINUTE));
 
     const stored = JSON.stringify(state);
-    assert.ok(!stored.includes(SECRETS.metaToken ?? '-'), 'нет в состоянии');
+    assert.ok(!stored.includes(SECRETS.META_TOKEN ?? '-'), 'нет в состоянии');
     const alerts = world.alertMessages();
     assert.equal(alerts.length, 2, 'алерты дошли — проверка ниже не пустая');
-    assert.ok(alerts.every((m) => !m.includes(SECRETS.metaToken ?? '-')), 'нет в алерте');
+    assert.ok(alerts.every((m) => !m.includes(SECRETS.META_TOKEN ?? '-')), 'нет в алерте');
     assert.ok(alerts.every((m) => m.includes('[секрет]')), 'текст ошибки сохранился, вычищен только токен');
     assert.ok(stored.includes('[секрет]'));
   });
@@ -318,7 +318,7 @@ describe('runRadar: алерты', () => {
   it('чат алертов не принимает сообщения: алерт повторяется, но красный запуск — раз в сутки', async () => {
     const { world, state } = await bootstrapped();
     world.fail.graph = json({ error: { code: 190, message: 'session invalidated' } }, 400);
-    world.blockedChats.add(SECRETS.telegramAlertChatId ?? '-');
+    world.blockedChats.add(SECRETS.TELEGRAM_ALERT_CHAT_ID ?? '-');
 
     const codes: number[] = [];
     for (let i = 0; i < 6; i += 1) codes.push((await runRadar(state, deps(world, T0 + i * 10 * MINUTE))).exitCode);
@@ -336,7 +336,7 @@ describe('runRadar: алерты', () => {
   it('чат алертов не принимает сообщения, источник мигает: красный запуск всё равно раз в сутки', async () => {
     const { world, state } = await bootstrapped();
     const broken = json({ error: { code: 2, message: 'Service temporarily unavailable' } }, 500);
-    world.blockedChats.add(SECRETS.telegramAlertChatId ?? '-');
+    world.blockedChats.add(SECRETS.TELEGRAM_ALERT_CHAT_ID ?? '-');
     const codes: number[] = [];
     // 6 часов: сбой, сбой, успех — запуски без отправки не доказывают, что Telegram починился
     for (let i = 0; i < 36; i += 1) {
@@ -356,7 +356,7 @@ describe('runRadar: алерты', () => {
     assert.equal(world.alertMessages().length, 2);
 
     delete world.fail.graph;
-    world.blockedChats.add(SECRETS.telegramAlertChatId ?? '-');
+    world.blockedChats.add(SECRETS.TELEGRAM_ALERT_CHAT_ID ?? '-');
     await runRadar(state, deps(world, T0 + 20 * MINUTE));
     assert.equal(world.alertMessages().length, 2, 'Telegram недоступен — уведомление не ушло');
 
@@ -364,7 +364,7 @@ describe('runRadar: алерты', () => {
     await runRadar(state, deps(world, T0 + 30 * MINUTE));
     const recovery = world.alertMessages().slice(2);
     assert.equal(recovery.length, 2);
-    assert.ok(recovery.every((m) => m.includes('снова отвечает')));
+    assert.ok(recovery.every((m) => m.includes('снова читаются')));
 
     await runRadar(state, deps(world, T0 + 40 * MINUTE));
     assert.equal(world.alertMessages().length, 4, 'и не повторяется после доставки');
@@ -431,13 +431,13 @@ describe('runRadar: секреты в запросах', () => {
     assert.equal(vk.length, 1);
     assert.equal(graph.length, 4, 'токен страницы, посты FB, аккаунт IG, медиа IG');
     for (const call of [...vk, ...graph]) {
-      for (const secret of [SECRETS.vkToken, SECRETS.metaToken, PAGE_TOKEN]) assert.ok(!call.url.includes(secret ?? '-'));
+      for (const secret of [SECRETS.VK_TOKEN, SECRETS.META_TOKEN, PAGE_TOKEN]) assert.ok(!call.url.includes(secret ?? '-'));
       assert.ok(!new URL(call.url).searchParams.has('access_token'));
     }
     assert.equal(vk[0]?.method, 'POST');
-    assert.ok(new URLSearchParams(vk[0]?.body).get('access_token') === SECRETS.vkToken);
+    assert.ok(new URLSearchParams(vk[0]?.body).get('access_token') === SECRETS.VK_TOKEN);
     for (const call of graph) {
-      const expected = new URL(call.url).pathname.endsWith('/posts') ? PAGE_TOKEN : SECRETS.metaToken;
+      const expected = new URL(call.url).pathname.endsWith('/posts') ? PAGE_TOKEN : SECRETS.META_TOKEN;
       assert.equal(call.headers.authorization, `Bearer ${expected}`, call.url);
     }
   });

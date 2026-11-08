@@ -1,9 +1,25 @@
 import { SourceError } from '../errors.ts';
-import type { FacebookSource, ParsedPosts, Post } from '../types.ts';
+import type { ParsedPosts, Post } from '../types.ts';
 import { asString, httpUrl, isRecord, parseGraphTime } from '../util.ts';
-import type { SourceContext } from './context.ts';
-import { graphGet } from './meta.ts';
+import type { SourceAdapter, SourceContext } from './adapter.ts';
+import { graphGet, parsePageId, type MetaPageSource } from './meta.ts';
 import { collectPosts } from './parse.ts';
+
+export interface FacebookSource extends MetaPageSource {
+  type: 'facebook';
+}
+
+export const facebookAdapter: SourceAdapter<FacebookSource> = {
+  type: 'facebook',
+  network: 'Facebook',
+  secrets: ['META_TOKEN'],
+  docs: 'docs/sources/meta.md',
+  parse(raw, base, issues) {
+    const pageId = parsePageId(raw, issues);
+    return pageId === undefined ? undefined : { ...base, type: 'facebook', pageId };
+  },
+  fetch: fetchFacebookPosts,
+};
 
 /**
  * Посты страницы читаются токеном страницы: Graph API выдаёт его в обмен на

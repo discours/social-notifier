@@ -7,9 +7,9 @@ import type { ParsedPosts, Post } from '../types.ts';
  * элемент непустого ответа, значит, API поменял формат — это ошибка, и через
  * два запуска она дойдёт до алерта, а не превратится в тихое «новых постов нет».
  */
-export function collectPosts(
-  items: readonly unknown[],
-  parseOne: (item: unknown) => Post | undefined,
+export function collectPosts<T>(
+  items: readonly T[],
+  parseOne: (item: T) => Post | undefined,
   what: string,
 ): ParsedPosts {
   const posts: Post[] = [];

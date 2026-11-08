@@ -35,8 +35,11 @@ jobs:
           TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
           VK_TOKEN: ${{ secrets.VK_TOKEN }}
           META_TOKEN: ${{ secrets.META_TOKEN }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           SEND_TEST: ${{ inputs.send_test }}
+          RADAR_CONFIG: ${{ vars.RADAR_CONFIG || 'radar.config.json' }}
         run: |
-          args=()
+          args=(--config "$RADAR_CONFIG")
           if [ "$SEND_TEST" = "true" ]; then args+=(--send-test); fi
           node src/probe.ts "${args[@]}"

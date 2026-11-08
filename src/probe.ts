@@ -47,7 +47,7 @@ async function main(): Promise<number> {
     }
   }
 
-  if (secrets.metaToken) {
+  if (secrets.META_TOKEN) {
     log('== Что видит токен Meta ==');
     try {
       // Только id: лог публичный, а при личном токене имя — это имя человека.
@@ -74,11 +74,11 @@ async function main(): Promise<number> {
   }
 
   log('== Telegram ==');
-  if (!secrets.telegramBotToken) {
+  if (!secrets.TELEGRAM_BOT_TOKEN) {
     failed += 1;
     log('не задан секрет TELEGRAM_BOT_TOKEN');
   } else {
-    const token = secrets.telegramBotToken;
+    const token = secrets.TELEGRAM_BOT_TOKEN;
     try {
       const bot = await getBotIdentity(fetchFn, token);
       log(`бот: @${bot.username}`);
@@ -102,15 +102,15 @@ async function main(): Promise<number> {
           log(`${label}: ОШИБКА ${err instanceof Error ? err.message : String(err)}`);
         }
       };
-      if (!secrets.telegramChatId) failed += 1;
-      await checkChat('чат для постов', secrets.telegramChatId, 'НЕ задан');
-      await checkChat('чат для алертов', secrets.telegramAlertChatId, 'не задан, алерты пойдут в чат для постов');
+      if (!secrets.TELEGRAM_CHAT_ID) failed += 1;
+      await checkChat('чат для постов', secrets.TELEGRAM_CHAT_ID, 'НЕ задан');
+      await checkChat('чат для алертов', secrets.TELEGRAM_ALERT_CHAT_ID, 'не задан, алерты пойдут в чат для постов');
       if (values['send-test']) {
         // Только в чат алертов: пробное сообщение в группе постов увидели бы все.
-        const target = secrets.telegramAlertChatId;
+        const target = secrets.TELEGRAM_ALERT_CHAT_ID;
         if (!target) throw new Error('send_test: не задан TELEGRAM_ALERT_CHAT_ID, а в чат постов проба не пишет');
-        await sendTelegramMessage(fetchFn, secrets.telegramBotToken, target, {
-          html: 'Радар постов: проверка связи. Это сообщение отправила проба доступов.',
+        await sendTelegramMessage(fetchFn, secrets.TELEGRAM_BOT_TOKEN, target, {
+          html: 'Проверка связи: бот может писать в этот чат. Сообщение отправила проба доступов (workflow probe).',
           disablePreview: true,
         });
         log('тестовое сообщение отправлено в чат алертов');

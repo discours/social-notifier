@@ -21,6 +21,8 @@ export interface SourceState {
   /** Последние известные ID постов, новые в начале. */
   seen: string[];
   consecutiveFailures: number;
+  /** Первый сбой текущей серии: по нему алерт говорит, как давно источник не читается. */
+  failingSince?: number;
   lastError?: { kind: FailureKind; code?: string; message: string; at: number };
   /** Когда последний раз доставлен алерт о поломке этого источника. */
   alertedAt?: number;
@@ -111,6 +113,7 @@ export function parseState(text: string): RadarState {
       !source.seen.every((s) => typeof s === 'string') ||
       !isCount(source.consecutiveFailures) ||
       !isOptionalTime(source.watchingSince) ||
+      !isOptionalTime(source.failingSince) ||
       !isOptionalTime(source.alertedAt) ||
       !isOptionalTime(source.alertRedAt) ||
       !(source.alertOpen === undefined || source.alertOpen === true) ||

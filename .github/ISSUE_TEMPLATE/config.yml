@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Уязвимость
+    url: https://github.com/discours/social-notifier/security/advisories/new
+    about: Сообщите приватно, не в открытом issue.
+  - name: Как настроить
+    url: https://github.com/discours/social-notifier/blob/main/docs/setup.md
+    about: Пошаговая настройка бота, сетей и расписания.

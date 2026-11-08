@@ -16,7 +16,8 @@ import { classifyVkError, fetchVkPosts, parseVkWall } from '../src/sources/vk.ts
 import { emptyState, loadState, newSourceState, parseState, rememberSeen, saveState, SEEN_LIMIT, sourceStateOf } from '../src/state.ts';
 import type { FetchLike } from '../src/http.ts';
 import { botCanPost, checkChatAccess, getBotIdentity, sendTelegramMessage, TelegramError } from '../src/telegram.ts';
-import type { PendingPost, Post, VkSource } from '../src/types.ts';
+import type { PendingPost, Post } from '../src/types.ts';
+import type { VkSource } from '../src/sources/vk.ts';
 import { makeRedactor, parseGraphTime } from '../src/util.ts';
 import { FakeWorld, MINUTE, PAGE_ID, PAGE_TOKEN, SECRETS, json, redact, testConfig } from './helpers.ts';
 
@@ -397,10 +398,10 @@ describe('секреты и сеть', () => {
   });
   it('сетевая ошибка не раскрывает адрес запроса', async () => {
     const failing = async () => {
-      throw new TypeError(`fetch failed for https://api.telegram.org/bot${SECRETS.telegramBotToken}/sendMessage`);
+      throw new TypeError(`fetch failed for https://api.telegram.org/bot${SECRETS.TELEGRAM_BOT_TOKEN}/sendMessage`);
     };
     await assert.rejects(requestJson(failing, 'https://example.test'), (e: unknown) => {
-      return e instanceof SourceError && e.kind === 'network' && !e.message.includes(SECRETS.telegramBotToken ?? '-');
+      return e instanceof SourceError && e.kind === 'network' && !e.message.includes(SECRETS.TELEGRAM_BOT_TOKEN ?? '-');
     });
   });
   it('страница ошибки не в JSON — сбой сети, а не смена формата API', async () => {

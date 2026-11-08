@@ -33,11 +33,12 @@ export async function requestJson(
   }
 }
 
-async function readText(
+/** Запрос с таймаутом; ответ — текстом. Сетевая ошибка — SourceError без адреса запроса. */
+export async function readText(
   fetchFn: FetchLike,
   url: string,
-  init: RequestInit,
-  timeoutMs: number,
+  init: RequestInit = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<{ status: number; text: string }> {
   try {
     const res = await fetchFn(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });

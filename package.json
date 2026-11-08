@@ -2,7 +2,7 @@
   "name": "social-notifier",
   "version": "0.1.0",
   "private": true,
-  "description": "Уведомления в Telegram о новых постах в VK, Instagram и Facebook",
+  "description": "Уведомления в Telegram о новых постах в VK, Instagram, Facebook, Bluesky, YouTube, X и RSS-лентах",
   "license": "MIT",
   "type": "module",
   "engines": {

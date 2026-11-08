@@ -1,0 +1,35 @@
+# YouTube
+
+Видео канала читаются через YouTube Data API v3 ключом: плейлист «Загрузки» канала, новые видео первыми.
+
+**Что нужно:** ключ API в Google Cloud. **Цена:** бесплатно. Каждый запуск тратит 2 единицы квоты: около 290 в сутки из бесплатных 10 000.
+
+У канала есть и RSS (`https://www.youtube.com/feeds/videos.xml?channel_id=…`) без ключа, и его можно подключить как [ленту](feed.md). Но в ноябре 2026 он отвечал 404 даже официальным каналам, поэтому основной путь — API.
+
+## Ключ
+
+1. В [Google Cloud Console](https://console.cloud.google.com/) создайте проект или выберите существующий.
+2. **APIs & Services** → **Library** → **YouTube Data API v3** → **Enable**.
+3. **APIs & Services** → **Credentials** → **Create credentials** → **API key**.
+4. У ключа нажмите **Edit API key** → **API restrictions** → **Restrict key** → только **YouTube Data API v3**. Тогда утёкший ключ не откроет другие API проекта.
+5. Сохраните ключ:
+
+   ```bash
+   gh secret set YOUTUBE_API_KEY --repo OWNER/REPO
+   ```
+
+Радар передаёт ключ в заголовке `x-goog-api-key`, не в адресе запроса.
+
+## Источник в конфиге
+
+```json
+{ "id": "youtube", "type": "youtube", "label": "YouTube", "channelId": "UCXEydGIYsqj-fjDnqAOXNNg" }
+```
+
+`channelId` — ID канала: `UC` и ещё 22 символа. Он виден в адресе вида `youtube.com/channel/UC…`. Если в адресе канала `@имя`, откройте описание канала → **Поделиться**: там есть пункт, копирующий идентификатор канала.
+
+## Что приходит
+
+- Публичные видео, Shorts и записи трансляций канала. Время — когда видео стало публичным.
+- Приватные видео и видео, доступные по ссылке, не приходят.
+- Признака Shorts в API нет: они приходят как обычные видео.
