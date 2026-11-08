@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, parseConfig } from '../src/config.ts';
@@ -20,6 +20,11 @@ describe('Дискурс по-русски: байт в байт с эталон
   });
 
   it('сообщения, алерты, лог, состояние и ошибки конфига совпадают с эталоном', async () => {
+    if (process.env.UPDATE_GOLDEN === '1') {
+      // Осознанная правка того, что видит редакция: эталон пересобирается, а дифф
+      // эталона показывает в ревью, что именно изменилось в сообщениях.
+      writeFileSync(FIXTURE, `${JSON.stringify(await runScenarios(), null, 2)}\n`);
+    }
     const text = readFileSync(FIXTURE, 'utf8');
     const golden = JSON.parse(text) as Golden;
     const actual = await runScenarios();

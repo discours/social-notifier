@@ -45,7 +45,8 @@ async function main(): Promise<number> {
     sendTest: values['send-test'] === true,
     findChats: values['find-chats'] === true,
   });
-  return config === undefined ? 1 : code;
+  // Без конфига сюда доходит только поиск чатов: его итог и есть код выхода.
+  return code;
 }
 
 main().then(
