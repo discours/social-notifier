@@ -4,7 +4,8 @@ import { wellFormed } from './util.ts';
 
 /** Предел длины сообщения в Telegram. Считаем по HTML: он не короче видимого текста. */
 export const TELEGRAM_TEXT_LIMIT = 4096;
-export const SNIPPET_LENGTH = 80;
+/** Длина отрывка поста в сообщении: строка «FB: отрывок» умещается в две строки чата на телефоне. */
+export const SNIPPET_LENGTH = 50;
 
 export interface OutgoingMessage {
   html: string;
@@ -20,7 +21,10 @@ export function escapeHtml(text: string): string {
   return wellFormed(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-/** Первая непустая строка текста, сжатая до `max` символов по границе слова. */
+/**
+ * Первая непустая строка текста, сжатая до `max` символов по границе слова.
+ * Знак препинания перед «…» отбрасывается: «меняет майку…», а не «майку,…».
+ */
 export function snippet(text: string, max = SNIPPET_LENGTH): string {
   const line = text
     .split('\n')
@@ -32,8 +36,10 @@ export function snippet(text: string, max = SNIPPET_LENGTH): string {
   if (chars.length <= max) return flat;
   const cut = chars.slice(0, max - 1).join('');
   const space = cut.lastIndexOf(' ');
-  const trimmed = space > max * 0.6 ? cut.slice(0, space) : cut;
-  return `${trimmed.trimEnd()}…`;
+  const trimmed = (space > max * 0.6 ? cut.slice(0, space) : cut).trimEnd();
+  // Хвост из одних знаков — оставить как есть, иначе от отрывка ничего не останется.
+  const bare = trimmed.replace(/[\s,;:.\-–—]+$/u, '');
+  return `${bare === '' ? trimmed : bare}…`;
 }
 
 /** Сообщение дайджеста и посты в нём: после доставки они снимаются с очереди. */
