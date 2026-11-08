@@ -15,7 +15,7 @@ on:
         type: boolean
         default: false
       find_chats:
-        description: 'Find chat IDs: the bot replies with the ID in every chat it heard from in the last 24 hours, except chats already saved in secrets'
+        description: 'Find chat IDs: the bot replies with the ID in up to 10 chats it heard from in the last 24 hours, except chats already saved in secrets'
         type: boolean
         default: false
 

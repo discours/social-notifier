@@ -185,10 +185,13 @@ export const en: Texts = {
       "Telegram does not return updates: this bot has a webhook, so another service receives its updates. Take the chat ID from that service's settings.",
     chatsNone:
       "no new chats: add the bot to a group or channel (to a channel as an admin allowed to post), send /start to the bot in a private chat and run the search again. Telegram keeps updates for 24 hours. If another service reads this bot's updates, take the chat ID from that service's settings.",
+    chatsTruncated:
+      'the bot has 100 or more pending updates, and the search sees only the oldest 100: a chat added later may be missing. Telegram deletes updates after 24 hours, so a later search sees newer ones.',
     chatName: (index, type) => `chat ${index} (${type})`,
     chatReplied: 'ID sent there as a message',
     chatKnown: (secret) => `already saved in ${secret}, no message sent`,
-    chatsSummary: (found, replied) => `chats found: ${found}, ID sent to ${replied}: look for the bot's message in each chat`,
+    chatsSummary: (found, replied) =>
+      replied === 0 ? `chats found: ${found}, no ID sent` : `chats found: ${found}, ID sent to ${replied}: look for the bot's message in those chats`,
     testSkippedForChats: 'send_test skipped: the chat search runs on its own; run the probe with send_test once more',
     chatIdIntro: "This chat's ID:",
     chatIdHint:

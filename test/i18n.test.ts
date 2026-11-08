@@ -149,9 +149,16 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
+/** Строки кода с кириллицей вне комментариев. Им пользуются и самопроверка, и храповик. */
+function humanTextLines(code: string): string[] {
+  return withoutComments(code)
+    .split('\n')
+    .filter((line) => CYRILLIC_IN_CODE.test(line));
+}
+
 describe('тексты для людей — только в каталоге языков', () => {
   it('сканер видит кириллицу в строке, шаблоне и регулярке и не видит её в комментариях', () => {
-    const found = (code: string) => CYRILLIC_IN_CODE.test(withoutComments(code));
+    const found = (code: string) => humanTextLines(code).length > 0;
     // Нарушения: каждое должно найтись, иначе храповик ниже ничего не доказывает.
     assert.ok(found("const a = 'привет';"));
     assert.ok(found('const a = "привет";'));
@@ -183,10 +190,7 @@ describe('тексты для людей — только в каталоге я
     assert.ok(files.length >= 20, `файлов просмотрено: ${files.length}`);
     assert.ok(files.includes(join('src', 'i18n', 'en.ts')));
     const offenders = files.flatMap((path) =>
-      withoutComments(readFileSync(path, 'utf8'))
-        .split('\n')
-        .filter((line) => CYRILLIC_IN_CODE.test(line))
-        .map((line) => `${path}: ${line.trim()}`),
+      humanTextLines(readFileSync(path, 'utf8')).map((line) => `${path}: ${line.trim()}`),
     );
     assert.deepEqual(offenders, []);
   });
@@ -394,6 +398,8 @@ class FakeBot {
   sent: { chatId: string; text: string }[] = [];
   blocked = new Set<string>();
   chats = new Map<string, { type: string; status?: string }>();
+  /** `@имя` канала или супергруппы → числовой ID для getChat. */
+  names = new Map<string, number>();
   vkPosts: { id: number; date: number; text: string }[] = [];
 
   fetch: FetchLike = async (input, init) => {
@@ -411,7 +417,11 @@ class FakeBot {
       return json({ ok: true, result: this.updates });
     }
     const chatId = String(params.chat_id);
-    if (method === 'getChat') return json({ ok: true, result: { id: Number(chatId), type: this.chats.get(chatId)?.type ?? 'private' } });
+    if (method === 'getChat') {
+      const id = chatId.startsWith('@') ? this.names.get(chatId) : Number(chatId);
+      if (id === undefined) return json({ ok: false, error_code: 400, description: 'Bad Request: chat not found' }, 400);
+      return json({ ok: true, result: { id, type: this.chats.get(chatId)?.type ?? 'private' } });
+    }
     if (method === 'getChatMember') return json({ ok: true, result: { status: this.chats.get(chatId)?.status ?? 'administrator', can_post_messages: true } });
     if (method === 'sendMessage') {
       if (this.blocked.has(chatId)) return json({ ok: false, error_code: 403, description: 'Forbidden: bot was kicked from the group chat' }, 403);
@@ -433,7 +443,7 @@ describe('поиск чатов по обновлениям бота', () => {
   it('находит личный чат, группу и канал; запрос не подтверждает обновления и не меняет подписку', async () => {
     const bot = new FakeBot();
     bot.updates = [message(987654321, 'private'), membership(-4455667788, 'supergroup', 'member'), channelPost(-1009988776655)];
-    const chats = await findRecentChats(bot.fetch, TOKEN);
+    const { chats } = await findRecentChats(bot.fetch, TOKEN);
     assert.deepEqual(chats, [
       { id: '987654321', type: 'private' },
       { id: '-4455667788', type: 'supergroup' },
@@ -451,7 +461,7 @@ describe('поиск чатов по обновлениям бота', () => {
       message(1, 'private'),
     ];
     assert.deepEqual(
-      (await findRecentChats(bot.fetch, TOKEN)).map((chat) => chat.id),
+      (await findRecentChats(bot.fetch, TOKEN)).chats.map((chat) => chat.id),
       ['2', '3', '1'],
     );
   });
@@ -460,12 +470,12 @@ describe('поиск чатов по обновлениям бота', () => {
     const bot = new FakeBot();
     bot.updates = [membership(-1, 'group', 'member'), membership(-2, 'group', 'member'), membership(-1, 'group', 'kicked'), membership(-3, 'channel', 'left')];
     assert.deepEqual(
-      (await findRecentChats(bot.fetch, TOKEN)).map((chat) => chat.id),
+      (await findRecentChats(bot.fetch, TOKEN)).chats.map((chat) => chat.id),
       ['-2'],
     );
     bot.updates.push(membership(-1, 'group', 'administrator'));
     assert.deepEqual(
-      (await findRecentChats(bot.fetch, TOKEN)).map((chat) => chat.id),
+      (await findRecentChats(bot.fetch, TOKEN)).chats.map((chat) => chat.id),
       ['-2', '-1'],
     );
   });
@@ -473,7 +483,7 @@ describe('поиск чатов по обновлениям бота', () => {
   it('не больше десяти чатов — последние по времени', async () => {
     const bot = new FakeBot();
     bot.updates = Array.from({ length: 15 }, (_, i) => message(1000 + i, 'private'));
-    const chats = await findRecentChats(bot.fetch, TOKEN);
+    const { chats } = await findRecentChats(bot.fetch, TOKEN);
     assert.equal(MAX_FOUND_CHATS, 10);
     assert.deepEqual(
       chats.map((chat) => chat.id),
@@ -494,7 +504,7 @@ describe('поиск чатов по обновлениям бота', () => {
       { update_id: 6, message: { chat: { id: 77, type: '<b>group</b>' } } },
       { update_id: 7, message: { chat: { id: 78 } } },
     ];
-    assert.deepEqual(await findRecentChats(bot.fetch, TOKEN), [
+    assert.deepEqual((await findRecentChats(bot.fetch, TOKEN)).chats, [
       { id: '77', type: undefined },
       { id: '78', type: undefined },
     ]);
@@ -513,11 +523,19 @@ describe('поиск чатов по обновлениям бота', () => {
     const bot = new FakeBot();
     bot.updates = Array.from({ length: 100_000 }, (_, i) => message(i + 1, 'private'));
     const started = performance.now();
-    const chats = await findRecentChats(bot.fetch, TOKEN);
+    const { chats } = await findRecentChats(bot.fetch, TOKEN);
     const elapsed = performance.now() - started;
     assert.equal(chats.length, MAX_FOUND_CHATS);
     assert.equal(chats.at(-1)?.id, '100000');
     assert.ok(elapsed < 3000, `разбор занял ${Math.round(elapsed)} мс`);
+  });
+
+  it('полная выборка из 100 обновлений помечена: более поздние обновления не видны', async () => {
+    const bot = new FakeBot();
+    bot.updates = Array.from({ length: 99 }, (_, i) => message(i + 1, 'private'));
+    assert.equal((await findRecentChats(bot.fetch, TOKEN)).truncated, false);
+    bot.updates.push(message(100, 'private'));
+    assert.equal((await findRecentChats(bot.fetch, TOKEN)).truncated, true);
   });
 });
 
@@ -573,12 +591,12 @@ describe('проба', () => {
     }
   });
 
-  it('поиск чатов: отказ одного чата не мешает остальным; ни одного ответа — код 1', async () => {
+  it('поиск чатов: отказ одного чата не мешает остальным, но запуск красный', async () => {
     const bot = new FakeBot();
     bot.updates = [message(987654321, 'private'), membership(-4455667788, 'supergroup', 'member')];
     bot.blocked.add('-4455667788');
     const { lines, deps } = probeDeps(bot, en, undefined, { findChats: true });
-    assert.equal(await runProbe(deps), 0);
+    assert.equal(await runProbe(deps), 1);
     assert.deepEqual(
       bot.sent.map((sent) => sent.chatId),
       ['987654321'],
@@ -588,6 +606,27 @@ describe('проба', () => {
     bot.blocked.add('987654321');
     bot.sent = [];
     assert.equal(await runProbe(probeDeps(bot, en, undefined, { findChats: true }).deps), 1);
+    // Известный чат из секретов не делает зелёным запуск, где ID не дошёл до нового чата.
+    const mixed = new FakeBot();
+    mixed.updates = [channelPost(-100111222333), message(987654321, 'private')];
+    mixed.blocked.add('987654321');
+    assert.equal(await runProbe(probeDeps(mixed, en, undefined, { findChats: true }).deps), 1);
+  });
+
+  it('поиск чатов говорит, что выборка полная и поздний чат мог в неё не попасть', async () => {
+    for (const t of [en, ru]) {
+      // Оживлённая группа постов: сотня её обновлений занимает всю выборку.
+      const busy = new FakeBot();
+      busy.updates = Array.from({ length: 100 }, () => channelPost(-100111222333));
+      const full = probeDeps(busy, t, undefined, { findChats: true });
+      assert.equal(await runProbe(full.deps), 0, full.lines.join('\n'));
+      assert.ok(full.lines.includes(t.probe.chatsTruncated), full.lines.join('\n'));
+      const calm = new FakeBot();
+      calm.updates = [channelPost(-100111222333)];
+      const short = probeDeps(calm, t, undefined, { findChats: true });
+      await runProbe(short.deps);
+      assert.ok(!short.lines.includes(t.probe.chatsTruncated), short.lines.join('\n'));
+    }
   });
 
   it('поиск чатов: нет чатов, webhook, нет токена — понятная строка и код 1', async () => {
@@ -687,6 +726,26 @@ describe('проба', () => {
     bot.updates = [channelPost(-100111222333)];
     assert.equal(await runProbe(probeDeps(bot, en, undefined, { findChats: true }).deps), 0);
     assert.deepEqual(bot.sent, []);
+  });
+
+  it('поиск чатов узнаёт чат постов, записанный по имени, и не пишет в него', async () => {
+    const bot = new FakeBot();
+    bot.names.set('@discours_posts', -100111222333);
+    bot.updates = [channelPost(-100111222333), message(987654321, 'private')];
+    const named = probeDeps(bot, en, undefined, { findChats: true });
+    assert.equal(await runProbe({ ...named.deps, secrets: { ...PROBE_SECRETS, TELEGRAM_CHAT_ID: '@discours_posts' } }), 0, named.lines.join('\n'));
+    assert.deepEqual(
+      bot.sent.map((sent) => sent.chatId),
+      ['987654321'],
+    );
+    assert.ok(named.lines.includes(`${en.probe.chatName(1, 'channel')}: ${en.probe.chatKnown('TELEGRAM_CHAT_ID')}`), named.lines.join('\n'));
+    // Имя не узналось — поиск никуда не пишет: ответ мог уйти в канал постов.
+    const lost = new FakeBot();
+    lost.updates = [channelPost(-100111222333), message(987654321, 'private')];
+    const unknown = probeDeps(lost, en, undefined, { findChats: true });
+    assert.equal(await runProbe({ ...unknown.deps, secrets: { ...PROBE_SECRETS, TELEGRAM_CHAT_ID: '@no_such_name' } }), 1);
+    assert.deepEqual(lost.sent, []);
+    assert.ok(unknown.lines.some((line) => line.startsWith('TELEGRAM_CHAT_ID: ERROR')), unknown.lines.join('\n'));
   });
 
   it('find_chats и send_test сразу: идёт поиск чатов, а пропуск send_test назван в логе', async () => {

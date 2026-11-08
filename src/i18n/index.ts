@@ -206,6 +206,8 @@ export interface Texts {
     readonly chatsSection: string;
     readonly chatsWebhook: string;
     readonly chatsNone: string;
+    /** getUpdates отдал полную выборку: более поздние обновления не видны. */
+    readonly chatsTruncated: string;
     /** Найденный чат в публичном логе: номер и тип, без ID и названия. */
     chatName(index: number, type: string): string;
     readonly chatReplied: string;

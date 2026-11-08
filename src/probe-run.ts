@@ -13,7 +13,7 @@ import type { FetchLike } from './http.ts';
 import { describe, type Texts } from './i18n/index.ts';
 import { probeSourcePosts } from './sources/index.ts';
 import { graphGet } from './sources/meta.ts';
-import { checkChatAccess, findRecentChats, getBotIdentity, sendTelegramMessage, TelegramError } from './telegram.ts';
+import { checkChatAccess, findRecentChats, getBotIdentity, resolveChatId, sendTelegramMessage, TelegramError } from './telegram.ts';
 import type { Post, RadarConfig } from './types.ts';
 import { asString, isRecord } from './util.ts';
 
@@ -183,34 +183,44 @@ async function probeChats(deps: ProbeDeps): Promise<0 | 1> {
     log(t.probe.botTokenMissing);
     return 1;
   }
-  let chats;
+  let found;
   try {
     const bot = await getBotIdentity(deps.fetch, token);
     log(t.probe.bot(bot.username));
     log(t.probe.chatsSection);
-    chats = await findRecentChats(deps.fetch, token);
+    found = await findRecentChats(deps.fetch, token);
   } catch (err) {
     log(err instanceof TelegramError && err.status === 409 ? t.probe.chatsWebhook : t.probe.failure('Telegram', redact(describe(err, t))));
     return 1;
   }
+  // Выборка полная: чат, добавленный позже, в неё мог не попасть — сказать
+  // об этом прямо, а не только «новых чатов нет».
+  if (found.truncated) log(t.probe.chatsTruncated);
+  const { chats } = found;
   if (chats.length === 0) {
     log(t.probe.chatsNone);
     return 1;
   }
   // Чат, чей ID уже в секретах, ответа не получает: в группе постов его
-  // увидели бы все подписчики. Сравнение — по записи ID числом, как его даёт поиск.
+  // увидели бы все подписчики. Сравнение — по числовому ID, как его даёт поиск.
   const known = new Map<string, string>();
   for (const name of ['TELEGRAM_CHAT_ID', 'TELEGRAM_ALERT_CHAT_ID'] as const) {
     const value = deps.secrets[name]?.trim();
-    if (value) known.set(value, name);
+    if (!value) continue;
+    try {
+      known.set(await resolveChatId(deps.fetch, token, value), name);
+    } catch (err) {
+      // Не узнали числовой ID записанного чата — не пишем никуда: ответ мог уйти в него.
+      log(t.probe.failure(name, redact(describe(err, t))));
+      return 1;
+    }
   }
   let replied = 0;
-  let skipped = 0;
+  let failed = 0;
   for (const [index, chat] of chats.entries()) {
     const name = t.probe.chatName(index + 1, chat.type ?? t.probe.unknown);
     const secret = known.get(chat.id);
     if (secret) {
-      skipped += 1;
       log(`${name}: ${t.probe.chatKnown(secret)}`);
       continue;
     }
@@ -220,9 +230,11 @@ async function probeChats(deps: ProbeDeps): Promise<0 | 1> {
       replied += 1;
       log(`${name}: ${t.probe.chatReplied}`);
     } catch (err) {
+      failed += 1;
       log(t.probe.failure(name, redact(describe(err, t))));
     }
   }
   log(t.probe.chatsSummary(chats.length, replied));
-  return replied + skipped > 0 ? 0 : 1;
+  // Отказ одного чата не мешает остальным, но запуск краснеет: в тот чат ID не дошёл.
+  return failed === 0 ? 0 : 1;
 }

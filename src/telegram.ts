@@ -162,6 +162,19 @@ export function botCanPost(
   return false;
 }
 
+/**
+ * Числовой ID чата по записи из секрета. Bot API принимает и `@имя` канала
+ * или супергруппы, а поиск чатов видит только число: без этого шага канал
+ * постов, записанный по имени, получил бы сообщение с ID. Число возвращается
+ * как есть, без запроса.
+ */
+export async function resolveChatId(fetchFn: FetchLike, token: string, chatId: string): Promise<string> {
+  if (/^-?\d{1,20}$/.test(chatId)) return chatId;
+  const chat = await callBot(fetchFn, token, 'getChat', { chat_id: chatId });
+  if (typeof chat.id === 'number' && Number.isSafeInteger(chat.id)) return String(chat.id);
+  throw httpError(200, undefined);
+}
+
 /** Чат, о котором бот узнал из обновлений: ID и тип по Bot API. */
 export interface FoundChat {
   id: string;
@@ -170,6 +183,8 @@ export interface FoundChat {
 
 /** Больше чатов поиск не отвечает: сообщение с ID уходит в каждый, и это не рассылка. */
 export const MAX_FOUND_CHATS = 10;
+/** Столько обновлений отдаёт один getUpdates; полная выдача значит, что более поздние не видны. */
+export const UPDATES_LIMIT = 100;
 const CHAT_TYPE = /^[a-z_]{1,20}$/;
 /** Обновления, в которых есть чат; в каждом — поле с объектом `chat`. */
 const CHAT_UPDATES = ['message', 'edited_message', 'channel_post', 'edited_channel_post', 'my_chat_member'] as const;
@@ -183,11 +198,11 @@ const CHAT_UPDATES = ['message', 'edited_message', 'channel_post', 'edited_chann
  * самых ранних неподтверждённых обновлений: у бота с большим потоком чат,
  * добавленный позже, в выборку не попадёт. Чат, откуда бота убрали, не
  * возвращается. Из выборки — до MAX_FOUND_CHATS чатов с самыми поздними
- * обновлениями.
+ * обновлениями; `truncated` — выборка полная, и более поздние обновления не видны.
  * Бот с webhook отвечает HTTP 409 — исключение TelegramError со статусом 409.
  */
-export async function findRecentChats(fetchFn: FetchLike, token: string): Promise<FoundChat[]> {
-  const { status, result } = await callBotRaw(fetchFn, token, 'getUpdates', { timeout: 0, limit: 100 });
+export async function findRecentChats(fetchFn: FetchLike, token: string): Promise<{ chats: FoundChat[]; truncated: boolean }> {
+  const { status, result } = await callBotRaw(fetchFn, token, 'getUpdates', { timeout: 0, limit: UPDATES_LIMIT });
   if (!Array.isArray(result)) throw httpError(status, undefined);
   // Повторное упоминание переносит чат в конец: порядок — по последнему обновлению.
   const chats = new Map<string, FoundChat & { removed: boolean }>();
@@ -205,10 +220,13 @@ export async function findRecentChats(fetchFn: FetchLike, token: string): Promis
     chats.delete(id);
     chats.set(id, { id, type, removed });
   }
-  return [...chats.values()]
-    .filter((chat) => !chat.removed)
-    .slice(-MAX_FOUND_CHATS)
-    .map(({ id, type }) => ({ id, type }));
+  return {
+    chats: [...chats.values()]
+      .filter((chat) => !chat.removed)
+      .slice(-MAX_FOUND_CHATS)
+      .map(({ id, type }) => ({ id, type })),
+    truncated: result.length >= UPDATES_LIMIT,
+  };
 }
 
 function defaultSleep(ms: number): Promise<void> {

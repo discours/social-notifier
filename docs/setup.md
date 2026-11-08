@@ -48,9 +48,9 @@ The `language` field sets the language of messages, alerts and logs: `"en"` or n
    gh workflow run probe.yml -f find_chats=true --repo OWNER/REPO
    ```
 
-   The bot replies in every chat where it recently appeared — group, channel and private chat — with a message holding that chat's ID. Chats whose IDs are already saved in `TELEGRAM_CHAT_ID` or `TELEGRAM_ALERT_CHAT_ID` get no message. IDs never reach the public log: it shows only the number and type of each chat. A group ID is a negative number; for a supergroup or a channel it starts with `-100`.
+   The bot replies in up to 10 chats where it recently appeared — group, channel and private chat — with a message holding that chat's ID. Chats whose IDs are already saved in `TELEGRAM_CHAT_ID` or `TELEGRAM_ALERT_CHAT_ID` get no message. IDs never reach the public log: it shows only the number and type of each chat. A group ID is a negative number; for a supergroup or a channel it starts with `-100`.
 
-   Telegram keeps a bot's updates for 24 hours, and the search reads the first 100 of them. If the bot was added earlier, send the command `/start@your_bot_name` to the group (by default the bot does not see ordinary group messages), publish any post in the channel, and run the search again. If another service already receives the bot's updates — through a webhook or its own polling — the search will not see them; take the ID from that service's settings.
+   Telegram keeps a bot's updates for 24 hours, and the search reads the first 100 of them; if there are more, it says so. If the bot was added earlier, send the command `/start@your_bot_name` to the group (by default the bot does not see ordinary group messages), publish any post in the channel, and run the search again. If another service already receives the bot's updates — through a webhook or its own polling — the search will not see them; take the ID from that service's settings.
 
    Save both IDs:
 
@@ -87,7 +87,7 @@ The probe reads every source the same way the radar does (X only the latest 5 po
 gh workflow run probe.yml --repo OWNER/REPO
 ```
 
-If the alerts chat is set, add `-f send_test=true`: the bot sends a test message there with a sample notification — the latest post of each source, exactly as posts will appear in the posts chat. Without `TELEGRAM_ALERT_CHAT_ID` the probe with this flag ends with an error.
+If the alerts chat is set, add `-f send_test=true`: the bot sends a test message there with a sample notification — the latest post of each source, exactly as posts will appear in the posts chat, in one or more messages. Without `TELEGRAM_ALERT_CHAT_ID` the probe with this flag ends with an error.
 
 The result is in the run log (Actions → probe). Each source shows `OK` and the date of its latest post, or `ERROR` with the reason.
 
