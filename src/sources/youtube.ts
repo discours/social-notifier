@@ -31,7 +31,7 @@ export const youtubeAdapter: SourceAdapter<YoutubeSource> = {
   parse(raw, base, issues) {
     const channelId = raw.channelId;
     if (typeof channelId !== 'string' || !CHANNEL_ID.test(channelId)) {
-      issues.add('channelId', 'ID канала: UC и ещё 22 символа');
+      issues.add('channelId', (t) => t.config.fields.youtubeChannelId);
       return undefined;
     }
     return { ...base, type: 'youtube', channelId };
@@ -63,11 +63,15 @@ async function youtubeGet(
   const { status, body } = await requestJson(ctx.fetch, url.toString(), { headers: { 'x-goog-api-key': key } });
   if (isRecord(body) && isRecord(body.error)) {
     const reason = errorReason(body.error);
-    const message = asString(body.error.message) ?? 'без описания';
-    throw new SourceError(classifyYoutubeError(status, reason), `YouTube API ${reason ?? status}: ${message}`, reason);
+    const message = asString(body.error.message);
+    throw new SourceError(
+      classifyYoutubeError(status, reason),
+      (t) => `YouTube API ${reason ?? status}: ${message ?? t.errors.noDescription}`,
+      reason,
+    );
   }
-  if (status >= 400) throw new SourceError('http', `YouTube API ответил HTTP ${status}`);
-  if (!isRecord(body)) throw new SourceError('bad_response', 'ответ YouTube API не объект');
+  if (status >= 400) throw new SourceError('http', (t) => t.errors.apiHttp('YouTube API', status));
+  if (!isRecord(body)) throw new SourceError('bad_response', (t) => t.errors.notObject('YouTube API'));
   return body;
 }
 
@@ -98,17 +102,17 @@ export function classifyYoutubeError(status: number, reason: string | undefined)
 /** Плейлист «Загрузки» канала: в нём все публичные видео, новые первыми. */
 function uploadsPlaylist(body: Record<string, unknown>): string {
   const items = Array.isArray(body.items) ? body.items : [];
-  if (items.length === 0) throw new SourceError('config', 'канал YouTube не найден: проверьте channelId');
+  if (items.length === 0) throw new SourceError('config', (t) => t.errors.youtubeChannelNotFound);
   const first: unknown = items[0];
   const details = isRecord(first) && isRecord(first.contentDetails) ? first.contentDetails : undefined;
   const related = details && isRecord(details.relatedPlaylists) ? details.relatedPlaylists : undefined;
   const uploads = related ? asString(related.uploads) : undefined;
-  if (!uploads || !PLAYLIST_ID.test(uploads)) throw new SourceError('bad_response', 'у канала YouTube нет плейлиста загрузок');
+  if (!uploads || !PLAYLIST_ID.test(uploads)) throw new SourceError('bad_response', (t) => t.errors.youtubeNoUploads);
   return uploads;
 }
 
 export function parsePlaylistItems(source: YoutubeSource, body: Record<string, unknown>): ParsedPosts {
-  if (!Array.isArray(body.items)) throw new SourceError('bad_response', 'в ответе YouTube нет списка видео');
+  if (!Array.isArray(body.items)) throw new SourceError('bad_response', (t) => t.errors.youtubeNoVideos);
   // Приватные и доступные по ссылке видео тоже лежат в «Загрузках», но звать
   // на них нельзя. Элемент без статуса не отбрасывается молча: он не разберётся
   // и, если формат ответа сменился, дойдёт до алерта.

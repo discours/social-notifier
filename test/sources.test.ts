@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { parseConfig } from '../src/config.ts';
 import { ALL_SECRETS, SOURCE_SECRETS } from '../src/env.ts';
 import { SourceError } from '../src/errors.ts';
+import { ru } from '../src/i18n/ru.ts';
 import { failureHint, formatDuration, formatFailureAlert, markAlertSent, markRecoverySent, recordFailure, recordSuccess } from '../src/health.ts';
 import { readText, type FetchLike } from '../src/http.ts';
 import { classifyBlueskyError, fetchBlueskyPosts, type BlueskySource } from '../src/sources/bluesky.ts';
@@ -236,7 +237,7 @@ describe('RSS и Atom', () => {
   });
 
   it('страница вместо ленты — ошибка формата; 404 — ошибка настройки', async () => {
-    assert.throws(() => parseFeed(FEED, '<!DOCTYPE html><html><body>404</body></html>', 10), /не RSS и не Atom/);
+    assert.throws(() => parseFeed(FEED, '<!DOCTYPE html><html><body>404</body></html>', 10), /neither RSS nor Atom/);
     const { fetch } = fakeFetch(() => text('<html>Not Found</html>', 404));
     await assert.rejects(fetchFeedPosts(FEED, ctx(fetch)), (e) => e instanceof SourceError && e.kind === 'config');
   });
@@ -415,7 +416,7 @@ describe('RSS и Atom', () => {
       },
     });
     const huge = fakeFetch(() => new Response(endless, { status: 200 }));
-    await assert.rejects(fetchFeedPosts(FEED, ctx(huge.fetch)), (e) => e instanceof SourceError && e.kind === 'bad_response' && /32 МБ/.test(e.message));
+    await assert.rejects(fetchFeedPosts(FEED, ctx(huge.fetch)), (e) => e instanceof SourceError && e.kind === 'bad_response' && /32 MB/.test(e.message));
     assert.ok(pulled <= 34, `прочитано кусков по 1 МБ: ${pulled}`);
     assert.ok(cancelled, 'чтение тела отменено');
   });
@@ -438,7 +439,7 @@ describe('RSS и Atom', () => {
       Object.defineProperty(res, 'url', { value: 'http://mastodon.social/@Mastodon.rss' });
       return res;
     });
-    await assert.rejects(fetchFeedPosts(FEED, ctx(downgraded.fetch)), (e) => e instanceof SourceError && e.kind === 'config' && /без https/.test(e.message));
+    await assert.rejects(fetchFeedPosts(FEED, ctx(downgraded.fetch)), (e) => e instanceof SourceError && e.kind === 'config' && /non-https/.test(e.message));
     const kept = fakeFetch(() => {
       const res = text(MASTODON_RSS);
       Object.defineProperty(res, 'url', { value: 'https://mastodon.social/@Mastodon.rss' });
@@ -859,8 +860,8 @@ describe('реестр сетей', () => {
 
   it('каждый секрет передан именно шагу радара и шагу пробы, и ни одного лишнего', () => {
     for (const [workflow, step] of [
-      ['.github/workflows/radar.yml', 'Радар'],
-      ['.github/workflows/probe.yml', 'Проба'],
+      ['.github/workflows/radar.yml', 'Radar'],
+      ['.github/workflows/probe.yml', 'Probe'],
     ] as const) {
       const steps = read(workflow).split(/^(?=\s+- name: )/m);
       const stepText = steps.find((s) => s.trimStart().startsWith(`- name: ${step}\n`)) ?? '';
@@ -899,7 +900,7 @@ describe('реестр сетей', () => {
   });
 
   it('версии API можно не указывать; неверный формат и чужие поля сетей называются', () => {
-    const base = { messageTitle: 't', groupWindowMinutes: 10, maxPostAgeHours: 48, fetchLimit: 10 };
+    const base = { language: 'ru', messageTitle: 't', groupWindowMinutes: 10, maxPostAgeHours: 48, fetchLimit: 10 };
     const config = parseConfig({ ...base, sources: [{ id: 'b', type: 'bluesky', label: 'B', handle: 'discours.bsky.social' }] });
     assert.equal(config.graphApiVersion, 'v25.0');
     assert.throws(
@@ -930,9 +931,9 @@ describe('алерты для людей', () => {
   const VK_SOURCE = { id: 'vk', type: 'vk' as const, label: 'VK', ownerId: -1 };
 
   it('подсказка сети без ключа не просит обновить секрет; оплата — своя подсказка', () => {
-    assert.ok(!failureHint('auth', BLUESKY_SOURCE).includes('секрет'));
-    assert.ok(failureHint('auth', VK_SOURCE).includes('секрет VK_TOKEN'));
-    assert.ok(failureHint('billing', { id: 'x', type: 'x', label: 'X', userId: '1' }).includes('кабинете разработчика X'));
+    assert.ok(!failureHint('auth', BLUESKY_SOURCE, ru).includes('секрет'));
+    assert.ok(failureHint('auth', VK_SOURCE, ru).includes('секрет VK_TOKEN'));
+    assert.ok(failureHint('billing', { id: 'x', type: 'x', label: 'X', userId: '1' }, ru).includes('кабинете разработчика X'));
   });
 
   it('алерт: сеть и давность первыми, затем действие, судьба постов и код', () => {
@@ -940,7 +941,7 @@ describe('алерты для людей', () => {
     const err = new SourceError('auth', 'VK API 5: User authorization failed', '5');
     recordFailure(state, err, NOW - 20 * MINUTE);
     recordFailure(state, err, NOW - 10 * MINUTE);
-    const lines = formatFailureAlert(VK_SOURCE, state, err, { now: NOW, maxPostAgeHours: 48, fetchLimit: 25, runUrl: 'https://github.com/o/r/actions/runs/1' }).html.split('\n');
+    const lines = formatFailureAlert(VK_SOURCE, state, err, { t: ru, now: NOW, maxPostAgeHours: 48, fetchLimit: 25, runUrl: 'https://github.com/o/r/actions/runs/1' }).html.split('\n');
     assert.equal(lines[0], '<b>VK</b>: посты не читаются, уже 20 мин.');
     assert.match(lines[1] ?? '', /^Что сделать: выпустите новый токен/);
     assert.equal(lines[2], 'Посты, вышедшие за это время, придут после починки — из последних 25 и не старше 48 ч.');
@@ -955,7 +956,7 @@ describe('алерты для людей', () => {
     const err = new SourceError('network', 'запрос не прошёл: таймаут');
     recordFailure(state, err, NOW);
     assert.equal(state.failingSince, undefined);
-    const first = formatFailureAlert(VK_SOURCE, state, err, { now: NOW, maxPostAgeHours: 48, fetchLimit: 25 }).html.split('\n')[0];
+    const first = formatFailureAlert(VK_SOURCE, state, err, { t: ru, now: NOW, maxPostAgeHours: 48, fetchLimit: 25 }).html.split('\n')[0];
     assert.equal(first, '<b>VK</b>: посты не читаются, сбоев подряд: 4.');
     recordSuccess(state);
     recordFailure(state, err, NOW + HOUR);
@@ -963,16 +964,16 @@ describe('алерты для людей', () => {
   });
 
   it('подсказка про конфиг называет и переменную RADAR_CONFIG', () => {
-    assert.match(failureHint('config', BLUESKY_SOURCE), /«bluesky» в конфиге \(radar\.config\.json или файл из переменной RADAR_CONFIG\)/);
+    assert.match(failureHint('config', BLUESKY_SOURCE, ru), /«bluesky» в конфиге \(radar\.config\.json или файл из переменной RADAR_CONFIG\)/);
   });
 
   it('начало серии сбоев в состоянии проверяется при чтении', () => {
     const withSource = (extra: Record<string, unknown>) =>
       JSON.stringify({ version: 1, pending: [], sources: { vk: { bootstrapped: true, seen: [], consecutiveFailures: 2, ...extra } } });
     assert.doesNotThrow(() => parseState(withSource({ failingSince: NOW })));
-    assert.throws(() => parseState(withSource({ failingSince: 'вчера' })), /источник vk/);
+    assert.throws(() => parseState(withSource({ failingSince: 'вчера' })), /source vk/);
     assert.doesNotThrow(() => parseState(withSource({ alertedPartial: true })));
-    assert.throws(() => parseState(withSource({ alertedPartial: 'да' })), /источник vk/);
+    assert.throws(() => parseState(withSource({ alertedPartial: 'да' })), /source vk/);
   });
 
   it('частичный алерт и полный: полный — сразу, дальше снова раз в сутки; обещание снимает доставленное «снова читаются»', () => {
@@ -999,7 +1000,7 @@ describe('алерты для людей', () => {
 
   it('давность сбоя по-русски', () => {
     assert.deepEqual(
-      [20 * MINUTE, 3 * HOUR, 47 * HOUR, 49 * HOUR, 5 * 24 * HOUR, 21 * 24 * HOUR, 11 * 24 * HOUR].map(formatDuration),
+      [20 * MINUTE, 3 * HOUR, 47 * HOUR, 49 * HOUR, 5 * 24 * HOUR, 21 * 24 * HOUR, 11 * 24 * HOUR].map((ms) => formatDuration(ms, ru)),
       ['20 мин', '3 ч', '47 ч', '2 дня', '5 дней', '21 день', '11 дней'],
     );
   });

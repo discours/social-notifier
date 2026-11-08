@@ -1,50 +1,52 @@
 # X
 
-Посты аккаунта читаются через X API v2 (`GET /2/users/:id/tweets`) токеном приложения (Bearer).
+**English** · [Русский](x.ru.md)
 
-**Что нужно:** кабинет разработчика X, приложение и кредиты на счету. **Цена:** платно. С 6 февраля 2026 года X берёт плату за каждый прочитанный пост: $0,005 за пост ([цены](https://docs.x.com/x-api/getting-started/pricing)). Бесплатного уровня для новых приложений нет.
+Account posts are read through the X API v2 (`GET /2/users/:id/tweets`) with an app token (Bearer).
 
-## Сколько это стоит
+**What you need:** an X developer account, an app, and credits on the balance. **Cost:** paid. Since February 6, 2026, X charges for every post read: $0.005 per post ([pricing](https://docs.x.com/x-api/getting-started/pricing)). There is no free tier for new apps.
 
-Радар просит у X только посты новее последнего виденного (`since_id`). Поэтому платить приходится в основном за новые посты:
+## What it costs
 
-- первый запуск читает до `fetchLimit` постов, при 25 — $0,125;
-- дальше — по $0,005 за каждый новый пост, при трёх постах в день около $0,45 в месяц;
-- каждый запуск пробы читает 5 последних постов заново, это $0,025.
+The radar asks X only for posts newer than the last one it saw (`since_id`). So you mostly pay for new posts:
 
-Документация X не говорит, тарифицируется ли пустой ответ и какая минимальная сумма пополнения. Проверьте в кабинете после первых суток.
+- the first run reads up to `fetchLimit` posts, but asks for no fewer than 5 (the X minimum): $0.125 at 25, up to $0.025 at `fetchLimit` below 5;
+- after that, $0.005 for each new post: about $0.45 a month at three posts a day;
+- a probe run reads the 5 latest posts: up to $0.025. X charges for the same post once per UTC day, so posts already read that day are usually free.
 
-## Токен
+X bills each post in the response, so a response without new posts should cost nothing; the documentation does not say so outright and does not name a minimum top-up. Check in the console after the first day.
 
-1. В [кабинете разработчика X](https://developer.x.com/) создайте приложение и пополните счёт.
-2. В приложении → **Keys and tokens** → **Bearer Token** → **Generate**.
-3. Сохраните токен:
+## Token
+
+1. In the [X developer console](https://developer.x.com/), create an app and top up the balance.
+2. In the app → **Keys and tokens** → **Bearer Token** → **Generate**.
+3. Save the token:
 
    ```bash
    gh secret set X_BEARER_TOKEN --repo OWNER/REPO
    ```
 
-4. Узнайте числовой ID аккаунта — это один платный запрос. Замените `USERNAME` на имя аккаунта без `@`. Команда спросит токен, не показывая его, и передаст curl через stdin, а не в аргументах: так он не попадёт ни в историю терминала, ни в список процессов. Работает в bash и zsh.
+4. Find the numeric account ID. This is one paid request. Replace `USERNAME` with the account name without `@`. The command asks for the token without showing it and passes it to curl through stdin, not in arguments, so it ends up neither in the terminal history nor in the process list. It works in bash and zsh.
 
    ```bash
    printf 'Bearer Token: '; read -rs T; echo; printf 'Authorization: Bearer %s\n' "$T" | curl -s -H @- https://api.x.com/2/users/by/username/USERNAME; unset T
    ```
 
-   ID — в поле `data.id`.
+   The ID is in the `data.id` field.
 
-## Источник в конфиге
+## Source in the config
 
 ```json
 { "id": "x", "type": "x", "label": "X", "userId": "1234567890", "username": "discours_io" }
 ```
 
-`userId` — числовой ID аккаунта: имя можно сменить, ID — нет. `username` необязателен и нужен только для ссылки вида `x.com/discours_io/status/…`; без него ссылка ведёт на `x.com/i/web/status/…`.
+`userId` is the numeric account ID: a name can be changed, an ID cannot. `username` is optional and is used only for links like `x.com/discours_io/status/…`; without it the link goes to `x.com/i/web/status/…`.
 
-## Что приходит
+## What arrives
 
-- Собственные посты аккаунта.
-- Не приходят ответы и репосты (`exclude=replies,retweets`).
+- The account's own posts.
+- Replies and reposts do not arrive (`exclude=replies,retweets`).
 
-## Если пришёл алерт `billing`
+## If you get a `billing` alert
 
-X отказал из-за оплаты: кончились кредиты или приложение не подключено к тарифу. Пополните счёт в кабинете разработчика и запустите пробу.
+X refused because of payment: the credits ran out, or the app is not connected to a plan. Top up the balance in the developer console and run the probe.

@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="444" viewBox="0 0 980 444" role="img" aria-labelledby="title desc">
+  <title id="title">social-notifier messages in Telegram</title>
+  <desc id="desc">Left, the posts chat: one message lists new posts from VK, Instagram, a blog and YouTube, each a link. Right, the alerts chat: an alert that Instagram posts can't be read for 20 minutes with what to do and the reason, then a notice that posts are being read again.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 14px; fill: #000; }
+    .caption { font-size: 13px; font-weight: 600; fill: #5b6b7a; letter-spacing: 0.04em; }
+    .bot { font-weight: 600; fill: #2f8fd8; }
+    .time { font-size: 11px; fill: #8fa0ae; }
+    .b { font-weight: 700; }
+    .a { fill: #2481cc; }
+    .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; fill: #c03d6d; }
+  </style>
+  <rect width="980" height="444" rx="18" fill="#dbe5ec"/>
+
+  <!-- Чат постов -->
+  <text class="caption" x="30" y="38">POSTS CHAT</text>
+  <rect x="30" y="54" width="440" height="214" rx="14" fill="#ffffff"/>
+  <text class="bot" x="46" y="80">Newsroom bot</text>
+  <text x="46" y="106">New posts — give them a like and a share:</text>
+  <text x="46" y="146"><tspan class="b">VK</tspan>: <tspan class="a">Home is the people around you</tspan></text>
+  <text x="46" y="168"><tspan class="b">Instagram</tspan>: <tspan class="a">Five children are no reason to give up</tspan></text>
+  <text x="46" y="190"><tspan class="a">on yourself</tspan></text>
+  <text x="46" y="212"><tspan class="b">Blog</tspan>: <tspan class="a">Who keeps the archive of a city</tspan></text>
+  <text x="46" y="234"><tspan class="b">YouTube</tspan>: <tspan class="a">Episode 12: why we still read letters</tspan></text>
+  <text class="time" x="424" y="258">12:04</text>
+
+  <!-- Чат алертов -->
+  <text class="caption" x="510" y="38">ALERTS CHAT</text>
+  <rect x="510" y="54" width="440" height="280" rx="14" fill="#ffffff"/>
+  <text class="bot" x="526" y="80">Newsroom bot</text>
+  <text x="526" y="106"><tspan class="b">Instagram</tspan>: can't read posts for 20 min.</text>
+  <text x="526" y="128">What to do: issue a new token and update the</text>
+  <text x="526" y="150">META_TOKEN secret in the repository settings</text>
+  <text x="526" y="172">(Settings → Secrets and variables → Actions).</text>
+  <text x="526" y="194">Posts published in the meantime will arrive after</text>
+  <text x="526" y="216">the fix if they are among the latest 25 and no</text>
+  <text x="526" y="238">older than 48 h.</text>
+  <text x="526" y="260">Reason: <tspan class="code">auth</tspan> — Graph API 190/463: Error</text>
+  <text x="526" y="282">validating access token: Session has expired</text>
+  <text x="526" y="304"><tspan class="a">Run log</tspan></text>
+  <text class="time" x="904" y="322">12:20</text>
+
+  <rect x="510" y="346" width="440" height="78" rx="14" fill="#ffffff"/>
+  <text class="bot" x="526" y="372">Newsroom bot</text>
+  <text x="526" y="398"><tspan class="b">Instagram</tspan>: posts are being read again.</text>
+  <text class="time" x="904" y="414">13:05</text>
+</svg>

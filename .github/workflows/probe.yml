@@ -2,13 +2,21 @@ name: probe
 
 # Ручная проверка доступов: читает каждый источник, показывает, какие страницы
 # и Instagram-аккаунты видит токен Meta, и проверяет бота Telegram.
-# Состояние не трогает. С send_test шлёт тестовое сообщение в чат алертов.
+# Состояние не трогает. С send_test шлёт в чат алертов тестовое сообщение с
+# образцом уведомления. С find_chats только ищет чаты: бот отвечает сообщением
+# с ID чата в чаты из первых 100 своих обновлений за сутки, кроме чатов, уже
+# записанных в секреты, — не больше чем в 10 самых поздних; новых чатов больше —
+# запуск красный. В лог ID не пишутся.
 
 on:
   workflow_dispatch:
     inputs:
       send_test:
-        description: 'Отправить тестовое сообщение в Telegram'
+        description: 'Send a test message with a sample notification to the alerts chat'
+        type: boolean
+        default: false
+      find_chats:
+        description: 'Find chat IDs: the bot replies with the ID in up to 10 chats it heard from in the last 24 hours, except chats already saved in secrets'
         type: boolean
         default: false
 
@@ -28,7 +36,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Проба
+      - name: Probe
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -38,8 +46,10 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           SEND_TEST: ${{ inputs.send_test }}
+          FIND_CHATS: ${{ inputs.find_chats }}
           RADAR_CONFIG: ${{ vars.RADAR_CONFIG || 'radar.config.json' }}
         run: |
           args=(--config "$RADAR_CONFIG")
           if [ "$SEND_TEST" = "true" ]; then args+=(--send-test); fi
+          if [ "$FIND_CHATS" = "true" ]; then args+=(--find-chats); fi
           node src/probe.ts "${args[@]}"

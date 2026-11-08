@@ -3,6 +3,7 @@ import { parseConfig } from '../src/config.ts';
 import type { RadarConfig } from '../src/types.ts';
 import { makeRedactor } from '../src/util.ts';
 import { secretValues, type Secrets } from '../src/env.ts';
+import { ru } from '../src/i18n/ru.ts';
 
 export const PAGE_ID = '1430627470564984';
 export const IG_ID = '17841400000000001';
@@ -21,10 +22,11 @@ export const SECRETS: Secrets = {
   X_BEARER_TOKEN: 'x-test-bearer-value',
 };
 
-export const redact = makeRedactor(secretValues(SECRETS));
+export const redact = makeRedactor(secretValues(SECRETS), ru.redacted);
 
 export function testConfig(overrides: Partial<Record<string, unknown>> = {}): RadarConfig {
   return parseConfig({
+    language: 'ru',
     messageTitle: 'Новые посты:',
     groupWindowMinutes: 10,
     maxPostAgeHours: 48,

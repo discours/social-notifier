@@ -1,34 +1,36 @@
-# Instagram и Facebook
+# Instagram and Facebook
 
-Обе сети читаются через Graph API одним токеном **системного пользователя** бизнес-портфолио Meta. Личный токен для этого не годится. Личную сессию Meta время от времени аннулирует (смена пароля, проверка безопасности), и интеграция молча перестаёт работать; токен системного пользователя живёт, пока его не отзовут.
+**English** · [Русский](meta.ru.md)
 
-**Что нужно:** бизнес-портфолио в [Meta Business Suite](https://business.facebook.com/), которому принадлежат страница Facebook и Instagram-аккаунт. Instagram — профессиональный (бизнес или автор) и привязан к странице. **Цена:** бесплатно.
+Both networks are read through the Graph API with one **system user** token from a Meta business portfolio. A personal token does not work for this. Meta invalidates personal sessions from time to time (a password change, a security check), and the integration silently stops working. A system user token lives until someone revokes it.
 
-Названия пунктов ниже — из английского интерфейса: он меняется реже переводов.
+**What you need:** a business portfolio in [Meta Business Suite](https://business.facebook.com/) that owns the Facebook page and the Instagram account. The Instagram account is professional (business or creator) and linked to the page. **Cost:** free.
 
-## Токен
+The menu names below are from the English interface: it changes less often than the translations.
 
-1. **Приложение.** На [developers.facebook.com/apps](https://developers.facebook.com/apps) создайте приложение типа «Бизнес» и привяжите его к своему портфолио. Публиковать приложение и проходить App Review не нужно: оно читает только активы своего же портфолио.
-2. **Системный пользователь.** [Business settings](https://business.facebook.com/settings) → **Users** → **System users** → **Add**, роль — Employee.
-3. **Доступы.** У системного пользователя → **Assign assets**:
-   - страница Facebook — хватает частичного доступа Insights: посты читаются токеном страницы, который Graph API выдаёт и при таком доступе;
-   - Instagram-аккаунт — тоже Insights;
-   - приложение из шага 1.
-4. **Токен.** У системного пользователя → **Generate new token** → приложение из шага 1, срок действия **Never**, разрешения:
+## Token
+
+1. **App.** At [developers.facebook.com/apps](https://developers.facebook.com/apps), create an app of the "Business" type and connect it to your portfolio. You do not need to publish the app or pass App Review: it reads only assets of its own portfolio.
+2. **System user.** [Business settings](https://business.facebook.com/settings) → **Users** → **System users** → **Add**, role Employee.
+3. **Access.** On the system user → **Assign assets**:
+   - the Facebook page — partial Insights access is enough: posts are read with a page token, which the Graph API issues with that access too;
+   - the Instagram account — Insights as well;
+   - the app from step 1.
+4. **Token.** On the system user → **Generate new token** → the app from step 1, expiration **Never**, permissions:
    - `pages_show_list`
    - `pages_read_engagement`
    - `pages_read_user_content`
    - `instagram_basic`
 
-   Токен показывается один раз. Сразу сохраните его:
+   The token is shown once. Save it right away:
 
    ```bash
    gh secret set META_TOKEN --repo OWNER/REPO
    ```
 
-5. Запустите пробу ([setup.md](../setup.md#3-проба-доступов)): она печатает ID всех страниц, которые видит токен, и привязанные к ним Instagram-аккаунты.
+5. Run the probe ([setup.md](../setup.md#3-access-probe)). It prints the IDs of all pages the token sees and the Instagram accounts linked to them.
 
-## Источники в конфиге
+## Sources in the config
 
 ```json
 [
@@ -37,11 +39,11 @@
 ]
 ```
 
-У обоих источников `pageId` — числовой ID страницы Facebook. Instagram находится через неё: радар берёт аккаунт, привязанный к странице.
+For both sources, `pageId` is the numeric ID of the Facebook page. Instagram is found through it: the radar takes the account linked to the page.
 
-Версия Graph API по умолчанию — `v25.0`. Другую можно задать полем `graphApiVersion` в корне конфига.
+The default Graph API version is `v25.0`. To use another one, set the `graphApiVersion` field at the root of the config.
 
-## Что приходит
+## What arrives
 
-- Instagram: посты, карусели и Reels самого аккаунта. Истории и совместные посты, где аккаунт соавтор, но не владелец, в выдачу `/media` не попадают.
-- Facebook: посты от имени страницы, без записей посетителей.
+- Instagram: posts, carousels, and Reels of the account itself. Stories, and collaborative posts where the account is a collaborator but not the owner, do not appear in the `/media` response.
+- Facebook: posts made in the name of the page, without visitor posts.

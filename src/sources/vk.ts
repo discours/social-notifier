@@ -21,7 +21,7 @@ export const vkAdapter: SourceAdapter<VkSource> = {
   parse(raw, base, issues) {
     const ownerId = raw.ownerId;
     if (typeof ownerId !== 'number' || !Number.isSafeInteger(ownerId) || ownerId === 0) {
-      issues.add('ownerId', 'целое число, у сообщества отрицательное');
+      issues.add('ownerId', (t) => t.config.fields.vkOwnerId);
       return undefined;
     }
     return { ...base, type: 'vk', ownerId };
@@ -50,13 +50,13 @@ export async function fetchVkPosts(source: VkSource, ctx: SourceContext): Promis
 export function parseVkWall(source: VkSource, status: number, body: unknown): ParsedPosts {
   if (isRecord(body) && isRecord(body.error)) {
     const code = Number(body.error.error_code);
-    const message = asString(body.error.error_msg) ?? 'без описания';
-    throw new SourceError(classifyVkError(code), `VK API ${code}: ${message}`, String(code));
+    const message = asString(body.error.error_msg);
+    throw new SourceError(classifyVkError(code), (t) => `VK API ${code}: ${message ?? t.errors.noDescription}`, String(code));
   }
-  if (status >= 400) throw new SourceError('http', `VK API ответил HTTP ${status}`);
+  if (status >= 400) throw new SourceError('http', (t) => t.errors.apiHttp('VK API', status));
   const response = isRecord(body) ? body.response : undefined;
   const items = isRecord(response) ? response.items : undefined;
-  if (!Array.isArray(items)) throw new SourceError('bad_response', 'в ответе VK нет списка постов');
+  if (!Array.isArray(items)) throw new SourceError('bad_response', (t) => t.errors.noPostList('VK'));
 
   return collectPosts(
     items,

@@ -31,12 +31,9 @@ export async function fetchInstagramPosts(source: InstagramSource, ctx: SourceCo
   const page = await graphGet(ctx, source.pageId, { fields: 'instagram_business_account' });
   const account = isRecord(page.instagram_business_account) ? asString(page.instagram_business_account.id) : undefined;
   if (!account) {
-    throw new SourceError(
-      'config',
-      'к странице не привязан профессиональный аккаунт Instagram или у токена нет права instagram_basic',
-    );
+    throw new SourceError('config', (t) => t.errors.instagramNotLinked);
   }
-  if (!/^\d+$/.test(account)) throw new SourceError('bad_response', 'ID аккаунта Instagram не число');
+  if (!/^\d+$/.test(account)) throw new SourceError('bad_response', (t) => t.errors.instagramIdNotNumber);
   const body = await graphGet(ctx, `${account}/media`, {
     fields: 'id,permalink,shortcode,timestamp,caption',
     limit: String(ctx.config.fetchLimit),
@@ -54,7 +51,7 @@ function mediaUrl(item: Record<string, unknown>): string | undefined {
 
 export function parseInstagramMedia(source: InstagramSource, body: Record<string, unknown>): ParsedPosts {
   const data = body.data;
-  if (!Array.isArray(data)) throw new SourceError('bad_response', 'в ответе Instagram нет списка публикаций');
+  if (!Array.isArray(data)) throw new SourceError('bad_response', (t) => t.errors.instagramNoMedia);
   return collectPosts(
     data,
     (item): Post | undefined => {

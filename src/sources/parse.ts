@@ -1,4 +1,5 @@
 import { SourceError } from '../errors.ts';
+import type { Phrase } from '../i18n/index.ts';
 import type { ParsedPosts, Post } from '../types.ts';
 
 /**
@@ -17,7 +18,7 @@ export const MAX_STORED_TEXT = 1000;
 export function collectPosts<T>(
   items: readonly T[],
   parseOne: (item: T) => Post | undefined,
-  what: string,
+  what: string | Phrase,
 ): ParsedPosts {
   const posts: Post[] = [];
   let skipped = 0;
@@ -27,7 +28,8 @@ export function collectPosts<T>(
     else posts.push(post.text.length > MAX_STORED_TEXT ? { ...post, text: post.text.slice(0, MAX_STORED_TEXT) } : post);
   }
   if (items.length > 0 && posts.length === 0) {
-    throw new SourceError('bad_response', `${what}: не разобран ни один из ${items.length} элементов ответа`);
+    const total = items.length;
+    throw new SourceError('bad_response', (t) => t.errors.noneParsed(typeof what === 'string' ? what : what(t), total));
   }
   return { posts, skipped };
 }

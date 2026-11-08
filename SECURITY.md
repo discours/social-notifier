@@ -1,18 +1,20 @@
-# Безопасность
+# Security
 
-## Как сообщить об уязвимости
+**English** · [Русский](SECURITY.ru.md)
 
-Не открывайте публичный issue. Сообщите приватно: вкладка **Security** → **Report a vulnerability** ([прямая ссылка](https://github.com/discours/social-notifier/security/advisories/new)). Отчёт увидят только сопровождающие.
+## How to report a vulnerability
 
-Опишите, что можно сделать и как это воспроизвести. Если в отчёт попал настоящий токен, укажите только его тип и где он лежит, без значения.
+Do not open a public issue. Report it privately: the **Security** tab → **Report a vulnerability** ([direct link](https://github.com/discours/social-notifier/security/advisories/new)). Only the maintainers will see the report.
 
-## Что считается уязвимостью
+Describe what can be done and how to reproduce it. If a real token ended up in the report, give only its type and where it is stored, not the value.
 
-- Секрет попадает в лог запуска, алерт, сообщение Telegram или ветку `state`.
-- Pull request из форка или чужой ввод (текст поста, ответ API) получает доступ к секретам или выполняет код в workflow.
-- Текст поста ломает разметку сообщения Telegram или подменяет ссылку.
-- Конфиг или ответ API направляет запрос с токеном на чужой адрес.
+## What counts as a vulnerability
 
-## Если ваш токен утёк
+- A secret ends up in a run log, an alert, a Telegram message, or the `state` branch.
+- A pull request from a fork, or foreign input (post text, an API response), gets access to secrets or runs code in a workflow.
+- Post text breaks the markup of a Telegram message or replaces a link.
+- The config or an API response sends a request with a token to a foreign address.
 
-Отзовите его в сети, которая его выдала, выпустите новый и обновите секрет репозитория. Как выпустить токен — на странице сети в [docs/sources](docs/sources). История Git и логи хранят значение и после удаления, поэтому отзыв обязателен.
+## If your token leaked
+
+Revoke it in the network that issued it, issue a new one, and update the repository secret. How to issue a token is on the network's page in [docs/sources](docs/sources). Git history and logs keep the value even after deletion, so revoking is required.

@@ -1,4 +1,5 @@
 import { SourceError } from './errors.ts';
+import type { Texts } from './i18n/index.ts';
 import { asString, isRecord } from './util.ts';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -28,8 +29,8 @@ export async function requestJson(
   } catch {
     // Страница ошибки прокси («502 Bad Gateway» в HTML) — временный сбой сети,
     // а не смена формата API: подсказка «радару нужна правка» здесь ложная.
-    if (status >= 400) throw new SourceError('http', `ответ не в JSON (HTTP ${status})`);
-    throw new SourceError('bad_response', `ответ не в JSON (HTTP ${status})`);
+    if (status >= 400) throw new SourceError('http', (t) => t.errors.notJson(status));
+    throw new SourceError('bad_response', (t) => t.errors.notJson(status));
   }
 }
 
@@ -56,7 +57,7 @@ export async function readText(
     return { status: res.status, text: await readBody(res, MAX_RESPONSE_BYTES), url: res.url };
   } catch (err) {
     if (err instanceof SourceError) throw err;
-    throw new SourceError('network', `запрос не прошёл: ${describeNetworkError(err)}`);
+    throw new SourceError('network', (t) => t.errors.requestFailed(describeNetworkError(err, t)));
   }
 }
 
@@ -71,7 +72,7 @@ async function readBody(res: Response, maxBytes: number): Promise<string> {
     size += value.byteLength;
     if (size > maxBytes) {
       await reader.cancel().catch(() => undefined);
-      throw new SourceError('bad_response', `ответ больше ${maxBytes / 1024 / 1024} МБ, дальше не читается`);
+      throw new SourceError('bad_response', (t) => t.errors.tooLarge(maxBytes / 1024 / 1024));
     }
     chunks.push(value);
   }
@@ -115,9 +116,9 @@ export function decoderFor(contentType: string | null, bytes: Uint8Array): TextD
   return new TextDecoder('utf-8');
 }
 
-function describeNetworkError(err: unknown): string {
-  if (!(err instanceof Error)) return 'неизвестная ошибка';
-  if (err.name === 'TimeoutError' || err.name === 'AbortError') return 'таймаут';
+function describeNetworkError(err: unknown, t: Texts): string {
+  if (!(err instanceof Error)) return t.errors.unknownError;
+  if (err.name === 'TimeoutError' || err.name === 'AbortError') return t.errors.timeout;
   const cause: unknown = (err as { cause?: unknown }).cause;
   const code = isRecord(cause) ? asString(cause.code) : undefined;
   return code ? `${err.name} (${code})` : err.name;

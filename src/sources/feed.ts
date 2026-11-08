@@ -40,7 +40,7 @@ export const feedAdapter: SourceAdapter<FeedSource> = {
   parse(raw, base, issues) {
     const url = feedUrl(raw.url);
     if (!url) {
-      issues.add('url', 'адрес ленты: https://…, без логина и пароля в адресе');
+      issues.add('url', (t) => t.config.fields.feedUrl);
       return undefined;
     }
     return { ...base, type: 'feed', url };
@@ -69,11 +69,11 @@ export async function fetchFeedPosts(source: FeedSource, ctx: SourceContext): Pr
     headers: { accept: 'application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8' },
   });
   // fetch идёт за перенаправлением и на http: тогда ленту мог подменить кто угодно по пути.
-  if (url !== '' && !url.startsWith('https:')) throw new SourceError('config', 'лента перенаправила на адрес без https');
-  if (status === 429) throw new SourceError('rate_limit', `лента ответила HTTP 429`);
-  if (status === 401 || status === 403) throw new SourceError('permission', `лента ответила HTTP ${status}`);
-  if (status === 404 || status === 410) throw new SourceError('config', `лента не найдена (HTTP ${status})`);
-  if (status >= 400) throw new SourceError('http', `лента ответила HTTP ${status}`);
+  if (url !== '' && !url.startsWith('https:')) throw new SourceError('config', (t) => t.errors.feedNotHttps);
+  if (status === 429) throw new SourceError('rate_limit', (t) => t.errors.feedHttp(status));
+  if (status === 401 || status === 403) throw new SourceError('permission', (t) => t.errors.feedHttp(status));
+  if (status === 404 || status === 410) throw new SourceError('config', (t) => t.errors.feedNotFound(status));
+  if (status >= 400) throw new SourceError('http', (t) => t.errors.feedHttp(status));
   return parseFeed(source, text, ctx.config.fetchLimit, ctx.notBefore);
 }
 
@@ -92,15 +92,15 @@ export function parseFeed(source: SourceBase, xml: string, limit: number, notBef
   const doc = normalizeXml(xml);
   const root = rootElement(doc);
   const isAtom = root === 'feed';
-  if (!isAtom && root !== 'rss' && root !== 'rdf:RDF') throw new SourceError('bad_response', 'по адресу ленты не RSS и не Atom');
+  if (!isAtom && root !== 'rss' && root !== 'rdf:RDF') throw new SourceError('bad_response', (t) => t.errors.feedNotRssOrAtom);
   const found = blocks(doc, isAtom ? 'entry' : 'item');
   if (found.length === 0 && PREFIXED_ENTRY.test(doc)) {
     // Иначе такая лента навсегда выглядела бы как «новых постов нет».
-    throw new SourceError('bad_response', 'записи ленты с префиксом пространства имён (например, rss:item) не поддерживаются');
+    throw new SourceError('bad_response', (t) => t.errors.feedPrefixedEntries);
   }
   // `<source>` в записи Atom описывает ленту-первоисточник со своими id и ссылкой.
   const entries = found.map((block) => (isAtom ? atomEntry(source, removeElements(block, 'source')) : rssItem(source, block)));
-  const { posts } = collectPosts(entries, (entry) => entry.post, 'Лента');
+  const { posts } = collectPosts(entries, (entry) => entry.post, (t) => t.errors.feedName);
   const newest = posts.sort((a, b) => b.publishedAt - a.publishedAt).slice(0, limit);
   // Неразобранная запись — сбой, только если из-за неё мог потеряться пост:
   // она не старше `notBefore` и попала бы в `limit` свежих. Запись без даты —

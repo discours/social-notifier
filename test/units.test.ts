@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 import { loadConfig, parseConfig } from '../src/config.ts';
 import { SourceError, toSourceError } from '../src/errors.ts';
 import { escapeHtml, formatDigest, snippet } from '../src/format.ts';
+import { ru } from '../src/i18n/ru.ts';
 import { takeDue } from '../src/group.ts';
 import { claimAlertRed, failureHint, markAlertSent, recordFailure, recordSuccess, REALERT_AFTER_MS } from '../src/health.ts';
 import { requestJson } from '../src/http.ts';
@@ -60,11 +61,11 @@ describe('format', () => {
   });
   it('formatDigest: превью только у одиночного поста, текст и ссылка экранированы', () => {
     const post: Post = { sourceId: 'vk', id: '1', url: 'https://x.test/?a=1&b="2"', publishedAt: 0, text: '<script>' };
-    const [single] = formatDigest('Заголовок', [post], () => 'VK');
+    const [single] = formatDigest(ru, 'Заголовок', [post], () => 'VK');
     assert.equal(single?.disablePreview, false);
     assert.ok(single?.html.includes('href="https://x.test/?a=1&amp;b=&quot;2&quot;"'));
     assert.ok(single?.html.includes('&lt;script&gt;'));
-    const [multi] = formatDigest('Заголовок', [post, { ...post, id: '2', text: '' }], () => 'VK');
+    const [multi] = formatDigest(ru, 'Заголовок', [post, { ...post, id: '2', text: '' }], () => 'VK');
     assert.equal(multi?.disablePreview, true);
     assert.ok(multi?.html.includes('пост без подписи'));
   });
@@ -76,7 +77,7 @@ describe('format', () => {
       publishedAt: i,
       text: `пост номер ${i}`,
     }));
-    const messages = formatDigest('Заголовок', posts, () => 'VK', 300);
+    const messages = formatDigest(ru, 'Заголовок', posts, () => 'VK', 300);
     assert.ok(messages.length > 1);
     for (const m of messages) {
       assert.ok(m.html.startsWith('Заголовок'));
@@ -169,7 +170,7 @@ describe('Meta', () => {
   });
   it('одиночный суррогат в тексте не попадает в сообщение', () => {
     const broken = `Пост ${String.fromCharCode(0xd83d)} обрезан`;
-    const [message] = formatDigest('Заголовок', [{ sourceId: 'vk', id: '1', url: 'https://vk.com/wall-1_1', publishedAt: 0, text: broken }], () => 'VK');
+    const [message] = formatDigest(ru, 'Заголовок', [{ sourceId: 'vk', id: '1', url: 'https://vk.com/wall-1_1', publishedAt: 0, text: broken }], () => 'VK');
     assert.ok(message);
     // encodeURIComponent бросает URIError на одиночном суррогате — та же проверка, что у isWellFormed.
     assert.doesNotThrow(() => encodeURIComponent(message.html), 'Telegram не примет текст с одиночным суррогатом');
@@ -280,8 +281,8 @@ describe('health', () => {
     assert.equal(claimAlertRed(s, 1 + REALERT_AFTER_MS), true);
   });
   it('подсказка называет нужный секрет', () => {
-    assert.ok(failureHint('auth', VK).includes('VK_TOKEN'));
-    assert.ok(failureHint('auth', { id: 'fb', type: 'facebook', label: 'FB', pageId: PAGE_ID }).includes('META_TOKEN'));
+    assert.ok(failureHint('auth', VK, ru).includes('VK_TOKEN'));
+    assert.ok(failureHint('auth', { id: 'fb', type: 'facebook', label: 'FB', pageId: PAGE_ID }, ru).includes('META_TOKEN'));
   });
 });
 
@@ -296,22 +297,22 @@ describe('state', () => {
     assert.deepEqual(loadState(path), state);
   });
   it('повреждённый файл — ошибка, а не тихий сброс', () => {
-    assert.throws(() => parseState('{'), /не JSON/);
+    assert.throws(() => parseState('{'), /not JSON/);
     assert.throws(() => parseState('{"version":2,"sources":{},"pending":[]}'), /version/);
-    assert.throws(() => parseState('{"version":1,"sources":{},"pending":[{"id":1}]}'), /очереди/);
+    assert.throws(() => parseState('{"version":1,"sources":{},"pending":[{"id":1}]}'), /queued post/);
     const post = { sourceId: 'vk', id: '1', url: 'https://vk.com/wall-1_1', publishedAt: 1, detectedAt: 1, text: '' };
     const withPost = (p: object) => JSON.stringify({ version: 1, sources: {}, pending: [p] });
     assert.doesNotThrow(() => parseState(withPost(post)), 'исправный пост проходит');
-    assert.throws(() => parseState(withPost({ ...post, publishedAt: null })), /очереди/, 'Infinity после JSON — null');
+    assert.throws(() => parseState(withPost({ ...post, publishedAt: null })), /queued post/, 'Infinity после JSON — null');
     const { text: _text, ...withoutText } = post;
-    assert.throws(() => parseState(withPost(withoutText)), /очереди/);
+    assert.throws(() => parseState(withPost(withoutText)), /queued post/);
     const source = { bootstrapped: true, seen: ['1'], consecutiveFailures: 0 };
     const withSource = (s: object) => JSON.stringify({ version: 1, sources: { vk: s }, pending: [] });
     assert.doesNotThrow(() => parseState(withSource(source)));
-    assert.throws(() => parseState(withSource({ ...source, seen: [1] })), /источник vk/);
-    assert.throws(() => parseState(withSource({ ...source, consecutiveFailures: -1 })), /источник vk/);
-    assert.throws(() => parseState(withSource({ ...source, alertedAt: 'вчера' })), /источник vk/, 'иначе now - alertedAt = NaN и алерты глохнут');
-    assert.throws(() => parseState(withSource({ ...source, alertOpen: 'да' })), /источник vk/);
+    assert.throws(() => parseState(withSource({ ...source, seen: [1] })), /source vk/);
+    assert.throws(() => parseState(withSource({ ...source, consecutiveFailures: -1 })), /source vk/);
+    assert.throws(() => parseState(withSource({ ...source, alertedAt: 'вчера' })), /source vk/, 'иначе now - alertedAt = NaN и алерты глохнут');
+    assert.throws(() => parseState(withSource({ ...source, alertOpen: 'да' })), /source vk/);
     assert.doesNotThrow(() => parseState(withSource({ ...source, alertedAt: 5, alertOpen: true, alertRedAt: 5, watchingSince: 1 })));
     const top = (extra: object) => JSON.stringify({ version: 1, sources: {}, pending: [], ...extra });
     assert.throws(() => parseState(top({ telegram: 'сломан' })), /telegram/);
@@ -342,6 +343,7 @@ describe('config', () => {
   });
   it('отклоняет нечисловой pageId, повтор id и нулевой ownerId', () => {
     const base = {
+      language: 'ru',
       messageTitle: 'x',
       groupWindowMinutes: 10,
       maxPostAgeHours: 48,
@@ -365,6 +367,7 @@ describe('config', () => {
   });
   it('отклоняет служебные имена в id и слишком длинный заголовок', () => {
     const base = {
+      language: 'ru',
       messageTitle: 'x',
       groupWindowMinutes: 10,
       maxPostAgeHours: 48,
@@ -390,7 +393,7 @@ describe('config', () => {
 
 describe('секреты и сеть', () => {
   it('redactor вычищает известные секреты и длинные токены, ссылки не трогает', () => {
-    const r = makeRedactor(['secret-value-1', undefined, 'abc']);
+    const r = makeRedactor(['secret-value-1', undefined, 'abc'], ru.redacted);
     assert.equal(r('токен secret-value-1 тут'), 'токен [секрет] тут');
     assert.equal(r('коротко abc'), 'коротко abc', 'слишком короткое значение не считается секретом');
     assert.equal(r(`x ${'A'.repeat(60)} y`), 'x [скрыто] y');

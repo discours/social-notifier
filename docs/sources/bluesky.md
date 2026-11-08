@@ -1,19 +1,21 @@
 # Bluesky
 
-Открытый профиль читается публичным API Bluesky (`app.bsky.feed.getAuthorFeed` на `public.api.bsky.app`) без входа и без ключа.
+**English** · [Русский](bluesky.ru.md)
 
-**Что нужно:** только хэндл профиля. **Цена:** бесплатно.
+A public profile is read through the public Bluesky API (`app.bsky.feed.getAuthorFeed` on `public.api.bsky.app`), without signing in and without a key.
 
-## Источник в конфиге
+**What you need:** only the profile handle. **Cost:** free.
+
+## Source in the config
 
 ```json
 { "id": "bluesky", "type": "bluesky", "label": "Bluesky", "handle": "discours.bsky.social" }
 ```
 
-`handle` — хэндл профиля без `@`: `имя.bsky.social` или свой домен вроде `example.com`. Вместо хэндла можно указать DID (`did:plc:…`): он не меняется, даже если сменить хэндл.
+`handle` is the profile handle without `@`: `name.bsky.social` or your own domain such as `example.com`. Instead of a handle you can use a DID (`did:plc:…`): it does not change even if you change the handle.
 
-## Что приходит
+## What arrives
 
-- Собственные посты профиля, включая посты с цитатой.
-- Не приходят репосты чужих постов, ответы и продолжения своих тредов: тред — одно уведомление.
-- Время поста — меньшее из времени, указанного приложением (`createdAt`), и времени, когда пост увидел сервер (`indexedAt`). Пост с датой из будущего не застрянет в очереди, а импортированный архив со старыми датами не придёт в группу.
+- The profile's own posts, including posts with a quote.
+- Reposts of other people's posts, replies, and continuations of the profile's own threads do not arrive: a thread is one notification.
+- The post time is the earlier of the time set by the app (`createdAt`) and the time the server first saw the post (`indexedAt`). A post dated in the future does not get stuck in the queue, and an imported archive with old dates does not flood the group.

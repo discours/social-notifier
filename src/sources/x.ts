@@ -36,11 +36,11 @@ export const xAdapter: SourceAdapter<XSource> = {
   parse(raw, base, issues) {
     const { userId, username } = raw;
     if (typeof userId !== 'string' || !USER_ID.test(userId)) {
-      issues.add('userId', 'строка из цифр: ID аккаунта, не имя');
+      issues.add('userId', (t) => t.config.fields.xUserId);
       return undefined;
     }
     if (username !== undefined && (typeof username !== 'string' || !USERNAME.test(username))) {
-      issues.add('username', 'имя аккаунта без @: латиница, цифры и «_», до 15 символов');
+      issues.add('username', (t) => t.config.fields.xUsername);
       return undefined;
     }
     return { ...base, type: 'x', userId, ...(username === undefined ? {} : { username }) };
@@ -77,7 +77,7 @@ export function parseXTimeline(source: XSource, status: number, body: unknown): 
     const detail = isRecord(body) ? asString(body.detail) : undefined;
     throw new SourceError(classifyXError(status, body), `X API HTTP ${status}: ${title ?? ''}${detail ? ` — ${detail}` : ''}`, String(status));
   }
-  if (!isRecord(body)) throw new SourceError('bad_response', 'ответ X API не объект');
+  if (!isRecord(body)) throw new SourceError('bad_response', (t) => t.errors.notObject('X API'));
   const data = body.data;
   // Без новых постов X отвечает {"meta": {"result_count": 0}} — поля data нет.
   if (data === undefined) {
@@ -85,15 +85,15 @@ export function parseXTimeline(source: XSource, status: number, body: unknown): 
     const first: unknown = errors[0];
     if (isRecord(first)) {
       // Ошибки ресурса приходят с HTTP 200: аккаунт не найден, закрыт или заблокирован.
-      const detail = asString(first.detail) ?? asString(first.title) ?? 'без описания';
+      const detail = asString(first.detail) ?? asString(first.title);
       const kind: FailureKind = asString(first.title) === 'Not Found Error' ? 'config' : 'permission';
-      throw new SourceError(kind, `X API: ${detail}`);
+      throw new SourceError(kind, (t) => `X API: ${detail ?? t.errors.noDescription}`);
     }
     const meta = isRecord(body.meta) ? body.meta : undefined;
     if (meta?.result_count === 0) return { posts: [], skipped: 0 };
-    throw new SourceError('bad_response', 'в ответе X API нет ни постов, ни meta.result_count');
+    throw new SourceError('bad_response', (t) => t.errors.xNoPostsNorCount);
   }
-  if (!Array.isArray(data)) throw new SourceError('bad_response', 'в ответе X API data не список');
+  if (!Array.isArray(data)) throw new SourceError('bad_response', (t) => t.errors.xDataNotList);
   const profile = source.username ?? 'i/web';
   return collectPosts(
     data,

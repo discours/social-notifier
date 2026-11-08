@@ -1,3 +1,4 @@
+import { LocalizedError } from '../i18n/index.ts';
 import type { ParsedPosts } from '../types.ts';
 import type { SourceAdapter, SourceContext, SourceSettings } from './adapter.ts';
 import { blueskyAdapter, type BlueskySource } from './bluesky.ts';
@@ -46,7 +47,7 @@ export function findAdapter(type: unknown): SourceAdapter<SourceConfig> | undefi
 
 export function adapterFor(source: SourceConfig): SourceAdapter<SourceConfig> {
   const adapter = findAdapter(source.type);
-  if (!adapter) throw new Error(`нет адаптера для сети ${source.type}`);
+  if (!adapter) throw new LocalizedError((t) => t.errors.noAdapter(source.type));
   return adapter;
 }
 
