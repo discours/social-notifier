@@ -133,6 +133,37 @@
         "dS4BKZ-IODo"
       ],
       "consecutiveFailures": 0
+    },
+    "telegram": {
+      "bootstrapped": true,
+      "watchingSince": 1794262810582,
+      "seen": [
+        "9623",
+        "9622",
+        "9621",
+        "9620",
+        "9619",
+        "9618",
+        "9608"
+      ],
+      "consecutiveFailures": 0
+    },
+    "iskra": {
+      "bootstrapped": true,
+      "watchingSince": 1794262810582,
+      "seen": [
+        "495",
+        "494",
+        "490",
+        "480",
+        "479",
+        "478",
+        "477",
+        "476",
+        "475",
+        "465"
+      ],
+      "consecutiveFailures": 0
     }
   },
   "pending": [],
