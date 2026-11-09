@@ -2,7 +2,7 @@
   "name": "social-notifier",
   "version": "0.1.0",
   "private": true,
-  "description": "New posts from VK, Instagram, Facebook, YouTube, X, Bluesky and RSS feeds in one Telegram message, with an alert when a network stops answering",
+  "description": "New posts from VK, Instagram, Facebook, YouTube, X, Bluesky, Telegram channels and RSS feeds in one Telegram message, with an alert when a network stops answering",
   "license": "MIT",
   "type": "module",
   "engines": {

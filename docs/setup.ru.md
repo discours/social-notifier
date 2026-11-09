@@ -31,7 +31,7 @@ gh api --method PUT repos/OWNER/REPO/environments/production --input - <<< '{"de
 gh api --method POST repos/OWNER/REPO/environments/production/deployment-branch-policies -f name=main -f type=branch
 ```
 
-В командах следующих разделов добавьте к `gh secret set` ключ `--env production`. Проба, запущенная с другой ветки, тогда остановится до первого шага: так и работает правило.
+В командах следующих разделов добавьте к `gh secret set` ключ `--env production`. Проба, запущенная с другой ветки, тогда остановится до первого шага: так и работает правило. Если секреты уже лежат в секретах репозитория, сохраните каждый заново с `--env production` и удалите копию репозитория командой `gh secret delete ИМЯ --repo OWNER/REPO`: оставленную копию прочитает любая ветка, ведь workflow, изменённый в ней, просто уберёт ключ `environment`.
 
 **Свой конфиг.** В корне лежит рабочий `radar.config.json` «Дискурса», и примеры на страницах сетей — тоже его аккаунты. В форке скопируйте этот файл в ветке `main`, например в `config/newsroom.json`, впишите свои `language`, `messageTitle` и источники, а путь укажите в переменной репозитория:
 
