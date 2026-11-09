@@ -21,6 +21,18 @@ gh api --method DELETE repos/OWNER/REPO/git/refs/heads/state
 
 В публичном репозитории видны логи запусков и ветка `state`. Секретов там нет: в логе только счётчики, ID и даты, в состоянии — ID постов, тексты постов, ждущих отправки, время и тексты ошибок, очищенные от токенов.
 
+**Секреты только для `main` (рекомендуем).** Задачи `radar` и `probe` используют environment `production`. Создайте его с правилом, которое пускает только `main`, и храните секреты там, а не в секретах репозитория: тогда код, запушенный в любую другую ветку, их не прочитает, даже если пушит человек с правом записи или кто-то с его утёкшим токеном. Без environment GitHub при первом запуске создаст пустой, и задачи возьмут секреты репозитория.
+
+```bash
+gh api --method PUT repos/OWNER/REPO/environments/production --input - <<< '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+```
+
+```bash
+gh api --method POST repos/OWNER/REPO/environments/production/deployment-branch-policies -f name=main -f type=branch
+```
+
+В командах следующих разделов добавьте к `gh secret set` ключ `--env production`. Проба, запущенная с другой ветки, тогда остановится до первого шага: так и работает правило.
+
 **Свой конфиг.** В корне лежит рабочий `radar.config.json` «Дискурса», и примеры на страницах сетей — тоже его аккаунты. В форке скопируйте этот файл в ветке `main`, например в `config/newsroom.json`, впишите свои `language`, `messageTitle` и источники, а путь укажите в переменной репозитория:
 
 ```bash

@@ -30,6 +30,13 @@ jobs:
     # С запасом: если задачу убьют до сохранения состояния, отправленные посты
     # придут повторно.
     timeout-minutes: 10
+    # Секреты лежат в environment production, а он пускает только задачи с
+    # main: ветка с изменённым кодом их не получит. Без записи о деплое на
+    # каждый запуск. В форке без такого environment GitHub создаст пустой,
+    # и задача возьмёт секреты репозитория.
+    environment:
+      name: production
+      deployment: false
     permissions:
       contents: write # запись в ветку state
     steps:

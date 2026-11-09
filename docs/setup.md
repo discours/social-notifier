@@ -21,6 +21,18 @@ Keep the copy public: GitHub Actions minutes are free for public repositories. I
 
 In a public repository the run logs and the `state` branch are visible. They hold no secrets: the log has only counters, IDs and dates; the state has post IDs, texts of posts waiting to be sent, timestamps and error texts scrubbed of tokens.
 
+**Secrets only for `main` (recommended).** The `radar` and `probe` jobs use the `production` environment. Create it with a rule that admits only `main`, and keep the secrets there instead of the repository secrets: then code pushed to any other branch cannot read them, even if the push comes from someone with write access or from their leaked token. Without the environment GitHub creates an empty one on the first run, and the jobs take the repository secrets.
+
+```bash
+gh api --method PUT repos/OWNER/REPO/environments/production --input - <<< '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+```
+
+```bash
+gh api --method POST repos/OWNER/REPO/environments/production/deployment-branch-policies -f name=main -f type=branch
+```
+
+In the commands of the following sections add `--env production` to `gh secret set`. The probe started from another branch then stops before its first step: that is the rule at work.
+
 **Your own config.** The root holds the working `radar.config.json` of Discours, and the examples on the network pages are its accounts too. In a fork, copy this file in the `main` branch, for example to `config/newsroom.json`, put in your own `language`, `messageTitle` and sources, and set the path in a repository variable:
 
 ```bash
