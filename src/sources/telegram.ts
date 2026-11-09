@@ -49,7 +49,7 @@ export async function fetchTelegramPosts(source: TelegramSource, ctx: SourceCont
   // страницы предпросмотра на карточку `t.me/<имя>`, где постов нет вовсе.
   // Пустой `url` — у подделанного в тестах ответа.
   if (url !== '' && !isPreviewUrl(url)) throw new SourceError('config', (t) => t.errors.telegramNoPreview(source.channel));
-  return parseChannelPage(source, text, ctx.config.fetchLimit);
+  return parseChannelPage(source, text, ctx.config.fetchLimit, ctx.notBefore);
 }
 
 /** Адрес после перенаправлений — всё ещё страница предпросмотра на https. */
@@ -77,7 +77,7 @@ const TEXT_CLASS = 'class="tgme_widget_message_text';
  * куска — от его `data-post` до следующего. Поиск внутри куска не уходит
  * дальше его конца, сколько бы мусора ни было в остальной странице.
  */
-export function parseChannelPage(source: TelegramSource, html: string, limit: number): ParsedPosts {
+export function parseChannelPage(source: TelegramSource, html: string, limit: number, notBefore = -Infinity): ParsedPosts {
   const anchors: number[] = [];
   for (let at = html.indexOf(ANCHOR); at !== -1; at = html.indexOf(ANCHOR, at + ANCHOR.length)) anchors.push(at);
   // Канал без единого сообщения на странице не бывает: даже у нового есть
@@ -93,12 +93,24 @@ export function parseChannelPage(source: TelegramSource, html: string, limit: nu
     if (tag.includes(SERVICE)) return;
     messages.push(html.slice(at, anchors[i + 1] ?? html.length));
   });
-  const { posts, skipped } = collectPosts(messages, (message) => parseMessage(source, message), 'Telegram');
-  // Страница идёт от старых к новым, но порядок здесь не важен: время у каждого поста своё.
-  return { posts: posts.sort((a, b) => b.publishedAt - a.publishedAt).slice(0, limit), skipped };
+  const entries = messages.map((message) => {
+    const publishedAt = messageTime(message);
+    return { publishedAt, post: publishedAt === undefined ? undefined : parseMessage(source, message, publishedAt) };
+  });
+  const { posts } = collectPosts(entries, (entry) => entry.post, 'Telegram');
+  const newest = posts.sort((a, b) => b.publishedAt - a.publishedAt).slice(0, limit);
+  // Неразобранное сообщение — сбой, только если из-за него мог потеряться пост:
+  // оно не старше `notBefore` и попало бы в `limit` свежих. Без даты судит место:
+  // страница идёт от старых к новым. Иначе одно старое битое сообщение давало бы
+  // алерт раз в сутки, пока оно на странице.
+  const oldestKept = newest.length === limit ? (newest.at(-1)?.publishedAt ?? -Infinity) : -Infinity;
+  const threshold = Math.max(oldestKept, notBefore);
+  const amongNewest = (i: number) => i >= entries.length - limit;
+  const skipped = entries.filter((e, i) => !e.post && (e.publishedAt === undefined ? amongNewest(i) : e.publishedAt >= threshold)).length;
+  return { posts: newest, skipped };
 }
 
-function parseMessage(source: TelegramSource, message: string): Post | undefined {
+function parseMessage(source: TelegramSource, message: string, publishedAt: number): Post | undefined {
   const end = message.indexOf('"', ANCHOR.length);
   if (end === -1 || end - ANCHOR.length > 64) return undefined;
   const [name = '', id = '', ...rest] = message.slice(ANCHOR.length, end).split('/');
@@ -106,8 +118,6 @@ function parseMessage(source: TelegramSource, message: string): Post | undefined
   if (rest.length > 0 || !CHANNEL.test(name) || name.toLowerCase() !== source.channel.toLowerCase() || !MESSAGE_ID.test(id)) {
     return undefined;
   }
-  const publishedAt = messageTime(message);
-  if (publishedAt === undefined) return undefined;
   // Ссылка строится из проверенных частей, а не берётся из разметки.
   return { sourceId: source.id, id, url: `${TME_ORIGIN}/${name}/${id}`, publishedAt, text: messageText(message) };
 }

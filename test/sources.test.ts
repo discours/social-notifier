@@ -721,6 +721,22 @@ describe('Telegram-каналы', () => {
     assert.throws(() => parseChannelPage(CHANNEL, foreign, 25), (e) => e instanceof SourceError && e.kind === 'bad_response');
   });
 
+  it('неразобранное сообщение — сбой, только если из-за него мог потеряться пост: среди fetchLimit свежих и не старше notBefore', () => {
+    const page = (channel: string, id: number, publishedAt: number, undated = false) => {
+      const html = channelPage(channel, [{ id, publishedAt, html: `пост ${id}` }]);
+      return undated ? html.replace('datetime="', 'data-time="') : html;
+    };
+    const skipped = (html: string, limit: number, notBefore?: number) => parseChannelPage(CHANNEL, html, limit, notBefore).skipped;
+    // Без даты судит место на странице: она идёт от старых к новым.
+    assert.equal(skipped(page('discoursio', 5, NOW, true) + page('discoursio', 7, NOW), 1), 0);
+    assert.equal(skipped(page('discoursio', 7, NOW) + page('discoursio', 8, NOW, true), 1), 1);
+    // С датой — время: старше самого старого из взятых постов или notBefore — не сбой.
+    assert.equal(skipped(page('other_channel', 5, NOW - 2 * HOUR) + page('discoursio', 7, NOW), 1), 0);
+    assert.equal(skipped(page('discoursio', 7, NOW - HOUR) + page('other_channel', 8, NOW), 1), 1);
+    assert.equal(skipped(page('other_channel', 5, NOW - 72 * HOUR) + page('discoursio', 7, NOW), 25, NOW - 24 * HOUR), 0);
+    assert.equal(skipped(page('other_channel', 5, NOW - HOUR) + page('discoursio', 7, NOW), 25, NOW - 24 * HOUR), 1);
+  });
+
   it('страница без единого сообщения — сбой формата, а не вечное «новых постов нет»; одни служебные — просто нет постов', () => {
     assert.throws(
       () => parseChannelPage(CHANNEL, '<html><body><section class="tgme_channel_history"></section></body></html>', 25),
