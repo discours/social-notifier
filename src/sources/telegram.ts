@@ -68,6 +68,7 @@ const SERVICE = 'service_message';
 const DATE_LINK = 'class="tgme_widget_message_date"';
 const DATETIME = 'datetime="';
 const TEXT_CLASS = 'class="tgme_widget_message_text';
+const REPLY_TEXT = 'js-message_reply_text';
 
 /**
  * Самые свежие `limit` постов страницы предпросмотра.
@@ -141,13 +142,25 @@ function messageTime(message: string): number | undefined {
  */
 function messageText(message: string): string {
   let at = message.indexOf(TEXT_CLASS);
-  // Класс ровно этот, а не начинающийся с него: следующий символ — пробел или кавычка.
-  while (at !== -1 && message[at + TEXT_CLASS.length] !== ' ' && message[at + TEXT_CLASS.length] !== '"') {
-    at = message.indexOf(TEXT_CLASS, at + TEXT_CLASS.length);
-  }
+  while (at !== -1 && !isOwnText(message, at + TEXT_CLASS.length)) at = message.indexOf(TEXT_CLASS, at + TEXT_CLASS.length);
   if (at === -1) return '';
   const open = message.indexOf('>', at + TEXT_CLASS.length);
   if (open === -1) return '';
   const close = message.indexOf('</div>', open + 1);
   return htmlToText(message.slice(open + 1, close === -1 ? message.length : close));
+}
+
+/**
+ * Узел с текстом самого поста: класс ровно `tgme_widget_message_text`, а не
+ * начинающийся с него, и это не цитата. У ответа на пост блок цитаты стоит
+ * раньше собственного текста, и её узел помечен `js-message_reply_text`.
+ * Поиск кавычки останавливается на кавычке следующего `class="`, так что
+ * кандидаты просматриваются линейно.
+ */
+function isOwnText(message: string, after: number): boolean {
+  const next = message[after];
+  if (next === '"') return true;
+  if (next !== ' ') return false;
+  const end = message.indexOf('"', after);
+  return end !== -1 && !message.slice(after, end).split(' ').includes(REPLY_TEXT);
 }

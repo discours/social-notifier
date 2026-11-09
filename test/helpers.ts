@@ -62,6 +62,8 @@ export interface TgMessage {
   html: string;
   /** Служебное сообщение: «Channel created», «… pinned …». */
   service?: boolean;
+  /** Ответ на пост канала: текст цитаты, который Telegram ставит перед текстом самого поста. */
+  reply?: string;
 }
 
 /**
@@ -76,7 +78,8 @@ export function channelPage(channel: string, messages: readonly TgMessage[]): st
       (m) => `<div class="tgme_widget_message_wrap js-widget_message_wrap"><div class="tgme_widget_message text_not_supported_wrap${m.service ? ' service_message' : ''} js-widget_message" data-post="${channel}/${m.id}" data-view="eyJjIjotMTEyMTUwMzYxNX0">
   <div class="tgme_widget_message_user"><a href="https://t.me/${channel}"><i class="tgme_widget_message_user_photo bgcolor1" data-content="Д"></i></a></div>
   <div class="tgme_widget_message_bubble">
-    <div class="tgme_widget_message_author accent_color"><a class="tgme_widget_message_owner_name" href="https://t.me/${channel}"><span dir="auto">Канал</span></a></div>
+    <div class="tgme_widget_message_author accent_color"><a class="tgme_widget_message_owner_name" href="https://t.me/${channel}"><span dir="auto">Канал</span></a></div>${m.reply === undefined ? '' : `
+<a class="tgme_widget_message_reply user-color-default" href="https://t.me/${channel}/1" "><div class="tgme_widget_message_author accent_color"><span class="tgme_widget_message_author_name" dir="auto">Канал</span></div><div class="tgme_widget_message_text js-message_reply_text" dir="auto">${m.reply}</div></a>`}
 <div class="media_supported_cont"><div class="tgme_widget_message_text js-message_text" dir="auto">${m.html}</div></div><div class="media_not_supported_cont"><div class="message_media_not_supported_wrap">
   <div class="message_media_not_supported">
     <div class="message_media_not_supported_label">Please open Telegram to view this post</div>

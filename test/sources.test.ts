@@ -721,6 +721,11 @@ describe('Telegram-каналы', () => {
     assert.throws(() => parseChannelPage(CHANNEL, foreign, 25), (e) => e instanceof SourceError && e.kind === 'bad_response');
   });
 
+  it('у ответа на пост — собственный текст, а не цитата, которую Telegram ставит раньше него', () => {
+    const page = channelPage('discoursio', [{ id: 9630, publishedAt: NOW, html: 'Новый текст', reply: 'Старый текст' }]);
+    assert.deepEqual(parseChannelPage(CHANNEL, page, 25).posts.map((p) => p.text), ['Новый текст']);
+  });
+
   it('неразобранное сообщение — сбой, только если из-за него мог потеряться пост: среди fetchLimit свежих и не старше notBefore', () => {
     const page = (channel: string, id: number, publishedAt: number, undated = false) => {
       const html = channelPage(channel, [{ id, publishedAt, html: `пост ${id}` }]);
@@ -773,6 +778,7 @@ describe('Telegram-каналы', () => {
 
   it('враждебная страница разбирается за линейное время', () => {
     const one = (html: string) => channelPage('discoursio', [{ id: 1, publishedAt: NOW, html }]);
+    const DATED = 'data-post="discoursio/1" class="tgme_widget_message_date" datetime="2026-11-08T12:00:00+00:00" ';
     // Размеры подобраны так, чтобы квадратичный разбор краснел за секунды, а не висел минутами.
     const hostile = [
       'data-post="'.repeat(400_000),
@@ -783,6 +789,10 @@ describe('Telegram-каналы', () => {
       // Текст без закрывающего </div> до конца страницы.
       `data-post="discoursio/1" class="tgme_widget_message_text">${'&lt;<i>'.repeat(300_000)}`,
       `${'<div class="tgme_widget_message service_message" '.repeat(50_000)}data-post="discoursio/1"`,
+      // С датой — чтобы разбор дошёл до текста: одни цитаты и текст без конца.
+      `${DATED}${'class="tgme_widget_message_text js-message_reply_text" '.repeat(100_000)}`,
+      `${DATED}${'class="tgme_widget_message_text '.repeat(100_000)}`,
+      `${DATED}class="tgme_widget_message_text">${'&lt;<i>'.repeat(300_000)}`,
     ];
     const started = performance.now();
     for (const html of hostile) {
