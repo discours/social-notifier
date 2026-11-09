@@ -404,6 +404,10 @@ describe('секреты и сеть', () => {
     assert.equal(r('коротко abc'), 'коротко abc', 'слишком короткое значение не считается секретом');
     assert.equal(r(`x ${'A'.repeat(60)} y`), 'x [скрыто] y');
     assert.equal(r('https://vk.com/wall-89236419_24072'), 'https://vk.com/wall-89236419_24072');
+    // Незнакомые токены короче 40 символов ловятся по виду: бот Telegram и ключ Google.
+    assert.equal(r(`bot 123456789:${'Ab_-'.repeat(9)}x/getMe`), 'bot [скрыто]/getMe');
+    assert.equal(r(`key=AIza${'S'.repeat(35)}&q=1`), 'key=[скрыто]&q=1');
+    assert.equal(r('2026-11-09T15:55:40Z и t.me/discoursio/9621'), '2026-11-09T15:55:40Z и t.me/discoursio/9621');
   });
   it('сетевая ошибка не раскрывает адрес запроса', async () => {
     const failing = async () => {
