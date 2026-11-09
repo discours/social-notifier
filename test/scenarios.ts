@@ -11,7 +11,7 @@ import type { FetchLike } from '../src/http.ts';
 import { runRadar } from '../src/radar.ts';
 import { emptyState, type RadarState } from '../src/state.ts';
 import type { RadarConfig } from '../src/types.ts';
-import { FakeWorld, HOUR, json, MINUTE, PAGE_ID, redact, SECRETS } from './helpers.ts';
+import { copyResponse, FakeWorld, HOUR, json, MINUTE, PAGE_ID, redact, SECRETS, tmePage } from './helpers.ts';
 import type { Secrets } from '../src/env.ts';
 
 /** Конфиг «Дискурса» из radar.config.json; тест сверяет, что файл совпадает с ним. */
@@ -28,6 +28,8 @@ export const DISCOURS_CONFIG = {
     { id: 'instagram', type: 'instagram', label: 'IG', pageId: PAGE_ID },
     { id: 'facebook', type: 'facebook', label: 'FB', pageId: PAGE_ID },
     { id: 'youtube', type: 'youtube', label: 'YT', channelId: 'UCXEydGIYsqj-fjDnqAOXNNg' },
+    { id: 'telegram', type: 'telegram', label: 'TG', channel: 'discoursio' },
+    { id: 'iskra', type: 'telegram', label: 'Искра', channel: 'mediaiskra' },
   ],
 };
 
@@ -71,7 +73,7 @@ class DiscoursWorld extends FakeWorld {
     const url = new URL(input);
     const replaced = this.override?.(url, init);
     if (replaced instanceof Error) throw replaced;
-    if (replaced) return replaced.clone();
+    if (replaced) return copyResponse(replaced);
     if (url.hostname === 'www.googleapis.com') {
       if (url.pathname.endsWith('/channels')) {
         return json({ items: [{ id: 'UCXEydGIYsqj-fjDnqAOXNNg', contentDetails: { relatedPlaylists: { uploads: UPLOADS } } }] });
@@ -137,6 +139,10 @@ class Scenario {
     this.world.addFb(`${PAGE_ID}_1`, at - 4 * HOUR, 'Старый пост Facebook');
     this.world.addIg('9001', at - 3 * HOUR, 'Старый пост Instagram');
     this.world.addYt('oldVideo001', at - 6 * HOUR, 'Старое видео');
+    this.world.addTg('discoursio', 1, at - 900 * DAY, 'Channel created', true);
+    this.world.addTg('discoursio', 9620, at - 2 * HOUR, 'Старый пост канала Дискурса');
+    this.world.addTg('mediaiskra', 1, at - 700 * DAY, 'Channel created', true);
+    this.world.addTg('mediaiskra', 495, at - 7 * HOUR, 'Старый пост Искры');
     await this.run(at);
   }
 
@@ -207,6 +213,15 @@ const FAILURES: { name: string; override: Override }[] = [
   { name: 'YouTube: HTTP 503 без ошибки', override: failOn('www.googleapis.com', () => json({}, 503)) },
   { name: 'YouTube: ответ не объект', override: failOn('www.googleapis.com', () => json('строка'), '/playlistItems') },
   { name: 'YouTube: нет списка видео', override: failOn('www.googleapis.com', () => json({ kind: 'youtube#playlistItemListResponse' }), '/playlistItems') },
+  {
+    name: 'Telegram: канала нет, t.me уводит на карточку',
+    override: failOn('t.me', () => tmePage('<html><body><div class="tgme_page"></div></body></html>', 'https://t.me/mediaiskra'), '/s/mediaiskra'),
+  },
+  {
+    name: 'Telegram: на странице канала нет сообщений',
+    override: failOn('t.me', () => tmePage('<html><body><section class="tgme_channel_history"></section></body></html>', 'https://t.me/s/discoursio'), '/s/discoursio'),
+  },
+  { name: 'Telegram: HTTP 429', override: failOn('t.me', () => tmePage('Too Many Requests', 'https://t.me/s/discoursio', 429), '/s/discoursio') },
 ];
 
 async function digestScenarios(): Promise<ScenarioRecord[]> {
@@ -221,6 +236,15 @@ async function digestScenarios(): Promise<ScenarioRecord[]> {
   await four.run(T0 + 6 * MINUTE);
   await four.run(T0 + 16 * MINUTE);
   out.push(four.record());
+
+  const channels = new Scenario('Telegram-каналы Дискурса и Искры: служебное сообщение не приходит');
+  await channels.bootstrap();
+  channels.world.addTg('discoursio', 9621, T0 + MINUTE, 'Новый дайджест <b>интересных</b> материалов<br/><br/>от читателей и авторов');
+  channels.world.addTg('discoursio', 9622, T0 + 2 * MINUTE, 'Дискурс pinned «Новый дайджест»', true);
+  channels.world.addTg('mediaiskra', 496, T0 + 3 * MINUTE, '<i class="emoji"><b>🗂️</b></i> «Новую газету» можно читать &amp; после закрытия!');
+  channels.world.addTg('mediaiskra', 497, T0 + 4 * MINUTE, '');
+  await channels.run(T0 + 15 * MINUTE);
+  out.push(channels.record());
 
   const one = new Scenario('один пост — с превью ссылки');
   await one.bootstrap();
@@ -370,6 +394,7 @@ const BAD_CONFIGS: { name: string; patch: (c: Record<string, unknown>) => unknow
         { id: 'g', type: 'x', label: 'X', userId: '@discours' },
         { id: 'h', type: 'x', label: 'X', userId: '1', username: 'слишком_длинное_имя' },
         { id: 'i', type: 'feed', label: 'RSS', url: 'http://user:pass@example.com/feed' },
+        { id: 'k', type: 'telegram', label: 'TG', channel: '@discoursio' },
         { id: 'j', type: 'vk', label: 'VK', ownerId: 1 },
         { id: 'j', type: 'vk', label: 'VK', ownerId: 2 },
       ],

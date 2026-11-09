@@ -5,6 +5,7 @@ import { blueskyAdapter, type BlueskySource } from './bluesky.ts';
 import { facebookAdapter, type FacebookSource } from './facebook.ts';
 import { feedAdapter, type FeedSource } from './feed.ts';
 import { instagramAdapter, type InstagramSource } from './instagram.ts';
+import { telegramAdapter, type TelegramSource } from './telegram.ts';
 import { vkAdapter, type VkSource } from './vk.ts';
 import { xAdapter, type XSource } from './x.ts';
 import { youtubeAdapter, type YoutubeSource } from './youtube.ts';
@@ -19,7 +20,8 @@ export type SourceConfig =
   | BlueskySource
   | YoutubeSource
   | XSource
-  | FeedSource;
+  | FeedSource
+  | TelegramSource;
 
 export type SourceType = SourceConfig['type'];
 
@@ -35,6 +37,7 @@ const ADAPTERS: { readonly [T in SourceType]: SourceAdapter<Extract<SourceConfig
   youtube: youtubeAdapter,
   x: xAdapter,
   feed: feedAdapter,
+  telegram: telegramAdapter,
 };
 
 export const SOURCE_TYPES = Object.keys(ADAPTERS) as SourceType[];

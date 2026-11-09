@@ -24,7 +24,7 @@ social-notifier treats silence as a failure. A source that fails two runs in a r
 - **Alerts instead of silence.** The alert names the network, how long it has been failing, the exact secret or setting to fix and the reason, with a link to the run log. After the fix comes “posts are being read again”. A source that keeps failing is reminded about once a day, not every ten minutes.
 - **Posts survive outages.** A post leaves the queue only after Telegram has accepted the message. Posts published while a network was down are picked up after the fix — up to `fetchLimit` per source, up to `maxPostAgeHours` old.
 - **No archive dumps.** The first run, and the first poll of every new source, remember the posts already published and send nothing. Your chat only ever sees new posts.
-- **Seven networks, one config file.** VK, Instagram, Facebook, YouTube, X, Bluesky and RSS/Atom, which covers Mastodon, Substack, blogs and podcasts.
+- **Eight networks, one config file.** VK, Instagram, Facebook, YouTube, X, Bluesky, Telegram channels and RSS/Atom, which covers Mastodon, Substack, blogs and podcasts.
 - **English or Russian.** One field, `"language": "en"` or `"ru"`, switches messages, alerts and logs.
 - **A probe that sets you up.** One workflow reads every source with your tokens, shows which pages the Meta token can see, finds your chat IDs — the bot replies with the ID right in each chat — and sends a sample notification built from your latest posts.
 - **Safe in a public repository.** Tokens never reach logs, alerts or saved state; the public log holds counters, IDs and dates. Every action is pinned by SHA.
@@ -41,8 +41,9 @@ social-notifier treats silence as a failure. A source that fails two runs in a r
 | [YouTube](docs/sources/youtube.md) | `youtube` | a YouTube Data API key | free within the quota |
 | [X](docs/sources/x.md) | `x` | an X API app token and credits | $0.005 per post read: cents a month for one account |
 | [RSS and Atom](docs/sources/feed.md) | `feed` | the feed URL | free: Mastodon, Substack, blogs, podcasts |
+| [Telegram channels](docs/sources/telegram.md) | `telegram` | nothing for a public channel | free |
 
-TikTok, Threads, Telegram channels, LinkedIn and Dzen are not supported yet — [what stands in the way for each](docs/sources/unsupported.md).
+TikTok, Threads, LinkedIn and Dzen are not supported yet — [what stands in the way for each](docs/sources/unsupported.md).
 
 ## Quick start
 
@@ -189,6 +190,7 @@ Both commands read `radar.config.json`. Pass your own config with `--config conf
 - Logs of a public repository are visible to everyone. Secrets never reach the log, alerts or state: known values and anything that looks like a token are scrubbed from every text before output. A normal run logs counters, IDs and dates; a dry run also shows post texts, and the probe shows names of pages and accounts the Meta token can see. That is public content.
 - Network tokens travel in a header or the request body, never in the URL. The Telegram Bot API accepts its token only in the URL path; the radar never prints that URL.
 - Workflows with secrets run only on schedule and by hand. A pull request from a fork gets no secrets: CI runs with read-only permissions.
+- Secrets kept in the `production` environment reach only jobs started from `main`. A copy left in the repository secrets can be read from any branch: a workflow changed there simply drops the `environment` key. How to set it up — [setup](docs/setup.md#0-your-own-copy).
 - Actions are pinned by SHA; Dependabot proposes updates monthly.
 
 Found a vulnerability? Report it privately as described in [SECURITY.md](SECURITY.md).

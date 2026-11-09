@@ -97,6 +97,9 @@ export const ru: Texts = {
     feedNotFound: (status) => `лента не найдена (HTTP ${status})`,
     feedNotRssOrAtom: 'по адресу ленты не RSS и не Atom',
     feedPrefixedEntries: 'записи ленты с префиксом пространства имён (например, rss:item) не поддерживаются',
+    telegramNoPreview: (channel) =>
+      `t.me/s/${channel} уводит со страницы предпросмотра: такого открытого канала нет, он закрытый или это имя пользователя либо бота`,
+    telegramNoPosts: 'на странице предпросмотра канала нет ни одного сообщения: Telegram мог изменить разметку',
     noneParsed: (what, total) => `${what}: не разобран ни один из ${total} элементов ответа`,
     partlyParsed: (skipped, total) => `не разобрано элементов ответа: ${skipped} из ${total}`,
     noAdapter: (type) => `нет адаптера для сети ${type}`,
@@ -126,6 +129,7 @@ export const ru: Texts = {
       xUserId: 'строка из цифр: ID аккаунта, не имя',
       xUsername: 'имя аккаунта без @: латиница, цифры и «_», до 15 символов',
       feedUrl: 'адрес ленты: https://…, без логина и пароля в адресе',
+      telegramChannel: 'открытое имя канала без @, как в t.me/имя: латиница, цифры и «_», от 4 до 32 символов',
     },
   },
 

@@ -110,6 +110,10 @@ export interface Texts {
     feedNotFound(status: number): string;
     readonly feedNotRssOrAtom: string;
     readonly feedPrefixedEntries: string;
+    /** t.me увёл со страницы предпросмотра канала: канала нет, он закрытый или это не канал. */
+    telegramNoPreview(channel: string): string;
+    /** На странице предпросмотра не нашлось ни одного сообщения. */
+    readonly telegramNoPosts: string;
     /** Ни один элемент непустого ответа не разобрался. */
     noneParsed(what: string, total: number): string;
     /** Часть элементов ответа не разобралась. */
@@ -142,6 +146,7 @@ export interface Texts {
       readonly xUserId: string;
       readonly xUsername: string;
       readonly feedUrl: string;
+      readonly telegramChannel: string;
     };
   };
 

@@ -19,9 +19,9 @@ concurrency:
   group: radar
   cancel-in-progress: false
 
-permissions:
-  contents: write # запись в ветку state
-  actions: write # продление расписания, см. шаг «Keep the schedule awake»
+# Права выдаются по задачам: шагу, который разбирает ответы сетей, не нужен
+# токен с правом выключать workflow и удалять логи.
+permissions: {}
 
 jobs:
   radar:
@@ -30,6 +30,15 @@ jobs:
     # С запасом: если задачу убьют до сохранения состояния, отправленные посты
     # придут повторно.
     timeout-minutes: 10
+    # Секреты лежат в environment production, а он пускает только задачи с
+    # main: ветка с изменённым кодом их не получит. Без записи о деплое на
+    # каждый запуск. В форке без такого environment GitHub создаст пустой,
+    # и задача возьмёт секреты репозитория.
+    environment:
+      name: production
+      deployment: false
+    permissions:
+      contents: write # запись в ветку state
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -99,13 +108,21 @@ jobs:
               commit --quiet -m "state: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push --quiet origin HEAD:refs/heads/state
 
-      # GitHub выключает расписание публичного репозитория после 60 дней без
-      # «активности репозитория»; что именно считается активностью, GitHub не
-      # уточняет. Две страховки без гарантии: коммиты в ветку state (при новых
-      # постах и раз в 25 дней) и повторное включение workflow через API.
-      # Сбой шага не красит запуск, но виден в логе.
+  # GitHub выключает расписание публичного репозитория после 60 дней без
+  # «активности репозитория»; что именно считается активностью, GitHub не
+  # уточняет. Две страховки без гарантии: коммиты в ветку state (при новых
+  # постах и раз в 25 дней) и повторное включение workflow через API.
+  # Отдельная задача — чтобы право actions: write было только у неё, а не у
+  # токена задачи radar. Сбой шага не красит запуск, но виден в логе.
+  keepalive:
+    needs: radar
+    if: always() && github.event_name == 'schedule' && needs.radar.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: write # повторное включение workflow
+    steps:
       - name: Keep the schedule awake
-        if: always() && github.event_name == 'schedule'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
