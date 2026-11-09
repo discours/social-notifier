@@ -10,6 +10,7 @@ import { readText, type FetchLike } from '../src/http.ts';
 import { classifyBlueskyError, fetchBlueskyPosts, type BlueskySource } from '../src/sources/bluesky.ts';
 import { feedUrl, fetchFeedPosts, parseFeed, type FeedSource } from '../src/sources/feed.ts';
 import { allAdapters, findAdapter, probeFetchLimit, probeSourcePosts, SOURCE_TYPES, type SourceContext } from '../src/sources/index.ts';
+import { fetchTelegramPosts, parseChannelPage, type TelegramSource } from '../src/sources/telegram.ts';
 import { fetchXPosts, newestId, type XSource } from '../src/sources/x.ts';
 import { MAX_STORED_TEXT } from '../src/sources/parse.ts';
 import { decodeEntities, htmlToText, MAX_ELEMENT_SOURCE, tagAttributes, textContent } from '../src/sources/xml.ts';
@@ -17,7 +18,7 @@ import { fetchYoutubePosts, type YoutubeSource } from '../src/sources/youtube.ts
 import { runRadar } from '../src/radar.ts';
 import { emptyState, newSourceState, parseState } from '../src/state.ts';
 import { httpUrl, MAX_URL_LENGTH } from '../src/util.ts';
-import { HOUR, json, MINUTE, SECRETS, testConfig } from './helpers.ts';
+import { channelPage, HOUR, json, MINUTE, SECRETS, testConfig, tmePage, type TgMessage } from './helpers.ts';
 
 const NOW = Date.UTC(2026, 10, 8, 12, 0);
 
@@ -669,6 +670,117 @@ describe('RSS и Atom', () => {
   });
 });
 
+// ---------- Telegram-каналы ----------
+
+const CHANNEL: TelegramSource = { id: 'telegram', type: 'telegram', label: 'TG', channel: 'discoursio' };
+const PREVIEW = 'https://t.me/s/discoursio';
+
+/** Страница канала: служебное «Channel created», пост с разметкой текста, альбом без подписи. */
+function channelMessages(): TgMessage[] {
+  return [
+    { id: 1, publishedAt: Date.UTC(2020, 0, 1), html: 'Channel created', service: true },
+    {
+      id: 9621,
+      publishedAt: Date.UTC(2026, 10, 8, 9, 8, 44),
+      html: '<tg-emoji emoji-id="5188440598033481771"><i class="emoji" style="background-image:url(\'//t.me/e.png\')"><b>✨</b></i></tg-emoji> <b>Новый дайджест</b> &amp; <a href="https://chtivo.spb.ru/" onclick="return confirm(\'Open this link?\\n\\n\'+this.href);">ссылка</a><br/><br/>вторая строка',
+    },
+    { id: 9608, publishedAt: Date.UTC(2026, 10, 5, 11, 43, 28), html: '' },
+    { id: 9622, publishedAt: Date.UTC(2026, 10, 8, 12, 26, 5), html: 'Дискурс pinned «Новый дайджест»', service: true },
+  ];
+}
+
+describe('Telegram-каналы', () => {
+  it('посты канала: ссылка из имени и номера, время из подвала, текст без разметки; служебные сообщения — не посты', async () => {
+    const { fetch, calls } = fakeFetch(() => tmePage(channelPage('discoursio', channelMessages()), PREVIEW));
+    const { posts, skipped } = await fetchTelegramPosts(CHANNEL, ctx(fetch));
+    assert.equal(skipped, 0);
+    assert.deepEqual(
+      posts.map((p) => [p.id, p.url, new Date(p.publishedAt).toISOString(), p.text]),
+      [
+        ['9621', 'https://t.me/discoursio/9621', '2026-11-08T09:08:44.000Z', '✨ Новый дайджест & ссылка\nвторая строка'],
+        ['9608', 'https://t.me/discoursio/9608', '2026-11-05T11:43:28.000Z', ''],
+      ],
+    );
+    // Ни ключей, ни лишнего: только страница предпросмотра.
+    assert.deepEqual(calls.map((c) => c.url), [PREVIEW]);
+    assert.equal(calls[0]?.headers.authorization, undefined);
+  });
+
+  it('из страницы — только самые свежие fetchLimit постов; имя канала сверяется без учёта регистра', () => {
+    const page = channelPage('DiscoursIO', channelMessages());
+    const { posts } = parseChannelPage(CHANNEL, page, 1);
+    assert.deepEqual(posts.map((p) => p.url), ['https://t.me/DiscoursIO/9621']);
+  });
+
+  it('сообщение чужого канала или без даты не разбирается и считается; ни одного разобранного — сбой формата', () => {
+    const foreign = channelPage('other_channel', [{ id: 5, publishedAt: NOW, html: 'чужой' }]);
+    const undated = channelPage('discoursio', [{ id: 6, publishedAt: NOW, html: 'без даты' }]).replace('datetime="', 'data-time="');
+    const good = channelPage('discoursio', [{ id: 7, publishedAt: NOW, html: 'свой' }]);
+    const { posts, skipped } = parseChannelPage(CHANNEL, foreign + undated + good, 25);
+    assert.deepEqual([posts.map((p) => p.id), skipped], [['7'], 2]);
+    assert.throws(() => parseChannelPage(CHANNEL, foreign, 25), (e) => e instanceof SourceError && e.kind === 'bad_response');
+  });
+
+  it('страница без единого сообщения — сбой формата, а не вечное «новых постов нет»; одни служебные — просто нет постов', () => {
+    assert.throws(
+      () => parseChannelPage(CHANNEL, '<html><body><section class="tgme_channel_history"></section></body></html>', 25),
+      (e) => e instanceof SourceError && e.kind === 'bad_response',
+    );
+    const onlyService = channelPage('discoursio', [{ id: 1, publishedAt: NOW, html: 'Channel created', service: true }]);
+    assert.deepEqual(parseChannelPage(CHANNEL, onlyService, 25), { posts: [], skipped: 0 });
+  });
+
+  it('канала нет — t.me уводит на карточку: ошибка настройки; 429 — rate_limit, 500 — http, увод на http — настройка', async () => {
+    const cases: [Response, string][] = [
+      [tmePage('<html><div class="tgme_page"></div></html>', 'https://t.me/discoursio'), 'config'],
+      [tmePage(channelPage('discoursio', channelMessages()), 'http://t.me/s/discoursio'), 'config'],
+      [tmePage('Not Found', PREVIEW, 404), 'config'],
+      [tmePage('Too Many Requests', PREVIEW, 429), 'rate_limit'],
+      [tmePage('Bad Gateway', PREVIEW, 502), 'http'],
+    ];
+    for (const [response, kind] of cases) {
+      const { fetch } = fakeFetch(() => response);
+      await assert.rejects(fetchTelegramPosts(CHANNEL, ctx(fetch)), (e) => e instanceof SourceError && e.kind === kind, kind);
+    }
+  });
+
+  it('имя канала — без @ и ссылки, по синтаксису Telegram: оно уходит в адрес запроса', () => {
+    const base = { language: 'ru', messageTitle: 't', groupWindowMinutes: 10, maxPostAgeHours: 48, fetchLimit: 10 };
+    const source = (channel: unknown) => ({ ...base, sources: [{ id: 't', type: 'telegram', label: 'TG', channel }] });
+    for (const good of ['discoursio', 'mediaiskra', 'DiscoursIO', 'ton1', `a${'b'.repeat(31)}`]) {
+      assert.doesNotThrow(() => parseConfig(source(good)), good);
+    }
+    for (const bad of ['@discoursio', 't.me/discoursio', 'discours.io', '1channel', 'abc', `a${'b'.repeat(32)}`, 'disc/../x', 42]) {
+      assert.throws(() => parseConfig(source(bad)), (e: Error) => e.message.includes('sources[0].channel'), String(bad));
+    }
+  });
+
+  it('враждебная страница разбирается за линейное время', () => {
+    const one = (html: string) => channelPage('discoursio', [{ id: 1, publishedAt: NOW, html }]);
+    // Размеры подобраны так, чтобы квадратичный разбор краснел за секунды, а не висел минутами.
+    const hostile = [
+      'data-post="'.repeat(400_000),
+      `${'x'.repeat(2_000_000)}${'data-post="discoursio/1"'.repeat(100_000)}`,
+      `data-post="discoursio/1" ${'class="tgme_widget_message_date"'.repeat(100_000)}`,
+      `data-post="discoursio/1" ${'class="tgme_widget_message_text'.repeat(100_000)}`,
+      one(`${'<b>'.repeat(300_000)}`),
+      // Текст без закрывающего </div> до конца страницы.
+      `data-post="discoursio/1" class="tgme_widget_message_text">${'&lt;<i>'.repeat(300_000)}`,
+      `${'<div class="tgme_widget_message service_message" '.repeat(50_000)}data-post="discoursio/1"`,
+    ];
+    const started = performance.now();
+    for (const html of hostile) {
+      try {
+        parseChannelPage(CHANNEL, html, 25);
+      } catch (err) {
+        assert.ok(err instanceof SourceError, String(err));
+      }
+    }
+    const elapsed = performance.now() - started;
+    assert.ok(elapsed < 3000, `разбор занял ${Math.round(elapsed)} мс`);
+  });
+});
+
 // ---------- YouTube ----------
 
 const YT: YoutubeSource = { id: 'youtube', type: 'youtube', label: 'YouTube', channelId: 'UCXEydGIYsqj-fjDnqAOXNNg' };
@@ -855,7 +967,7 @@ describe('реестр сетей', () => {
     }
     const used = new Set<string>(allAdapters().flatMap((adapter) => adapter.secrets));
     assert.deepEqual(SOURCE_SECRETS.filter((secret) => !used.has(secret)), [], 'секрет, которого не просит ни одна сеть');
-    assert.deepEqual([...SOURCE_TYPES].sort(), ['bluesky', 'facebook', 'feed', 'instagram', 'vk', 'x', 'youtube']);
+    assert.deepEqual([...SOURCE_TYPES].sort(), ['bluesky', 'facebook', 'feed', 'instagram', 'telegram', 'vk', 'x', 'youtube']);
   });
 
   it('каждый секрет передан именно шагу радара и шагу пробы, и ни одного лишнего', () => {

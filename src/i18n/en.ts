@@ -88,6 +88,9 @@ export const en: Texts = {
     feedNotFound: (status) => `feed not found (HTTP ${status})`,
     feedNotRssOrAtom: 'the feed URL serves neither RSS nor Atom',
     feedPrefixedEntries: 'feed entries with a namespace prefix (for example, rss:item) are not supported',
+    telegramNoPreview: (channel) =>
+      `t.me/s/${channel} leads away from the channel preview: there is no such public channel, it is private, or the name belongs to a user or a bot`,
+    telegramNoPosts: 'the channel preview page has no messages at all: Telegram may have changed its markup',
     noneParsed: (what, total) => `${what}: none of the ${total} response items could be parsed`,
     partlyParsed: (skipped, total) => `response items not parsed: ${skipped} of ${total}`,
     noAdapter: (type) => `no adapter for network ${type}`,
@@ -117,6 +120,7 @@ export const en: Texts = {
       xUserId: 'a string of digits: the account ID, not the name',
       xUsername: 'account name without @: Latin letters, digits and “_”, up to 15 characters',
       feedUrl: 'feed URL: https://…, without a username or password in it',
+      telegramChannel: 'public channel name without @, as in t.me/name: Latin letters, digits and “_”, from 4 to 32 characters',
     },
   },
 

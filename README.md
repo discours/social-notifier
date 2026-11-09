@@ -41,8 +41,9 @@ social-notifier treats silence as a failure. A source that fails two runs in a r
 | [YouTube](docs/sources/youtube.md) | `youtube` | a YouTube Data API key | free within the quota |
 | [X](docs/sources/x.md) | `x` | an X API app token and credits | $0.005 per post read: cents a month for one account |
 | [RSS and Atom](docs/sources/feed.md) | `feed` | the feed URL | free: Mastodon, Substack, blogs, podcasts |
+| [Telegram channels](docs/sources/telegram.md) | `telegram` | nothing for a public channel | free |
 
-TikTok, Threads, Telegram channels, LinkedIn and Dzen are not supported yet — [what stands in the way for each](docs/sources/unsupported.md).
+TikTok, Threads, LinkedIn and Dzen are not supported yet — [what stands in the way for each](docs/sources/unsupported.md).
 
 ## Quick start
 

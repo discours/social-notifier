@@ -344,7 +344,7 @@ describe('config', () => {
     const config = loadConfig('radar.config.json');
     assert.deepEqual(
       config.sources.map((s) => s.type),
-      ['vk', 'instagram', 'facebook', 'youtube'],
+      ['vk', 'instagram', 'facebook', 'youtube', 'telegram', 'telegram'],
     );
   });
   it('отклоняет нечисловой pageId, повтор id и нулевой ownerId', () => {

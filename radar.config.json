@@ -10,6 +10,8 @@
     { "id": "vk", "type": "vk", "label": "VK", "ownerId": -89236419 },
     { "id": "instagram", "type": "instagram", "label": "IG", "pageId": "1430627470564984" },
     { "id": "facebook", "type": "facebook", "label": "FB", "pageId": "1430627470564984" },
-    { "id": "youtube", "type": "youtube", "label": "YT", "channelId": "UCXEydGIYsqj-fjDnqAOXNNg" }
+    { "id": "youtube", "type": "youtube", "label": "YT", "channelId": "UCXEydGIYsqj-fjDnqAOXNNg" },
+    { "id": "telegram", "type": "telegram", "label": "TG", "channel": "discoursio" },
+    { "id": "iskra", "type": "telegram", "label": "Искра", "channel": "mediaiskra" }
   ]
 }

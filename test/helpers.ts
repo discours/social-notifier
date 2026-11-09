@@ -55,6 +55,68 @@ export interface Call {
 
 type Failure = Response | Error;
 
+/** Сообщение канала Telegram для страницы предпросмотра. `html` — разметка текста как есть. */
+export interface TgMessage {
+  id: number;
+  publishedAt: number;
+  html: string;
+  /** Служебное сообщение: «Channel created», «… pinned …». */
+  service?: boolean;
+}
+
+/**
+ * Страница `t.me/s/<канал>` в форме живой (09.11.2026): сообщения от старых к
+ * новым, у каждого `data-post`, текст и ссылка-дата в подвале. Картинки,
+ * реакции и SVG хвостов сняты — разбор на них не смотрит.
+ */
+export function channelPage(channel: string, messages: readonly TgMessage[]): string {
+  const items = [...messages]
+    .sort((a, b) => a.id - b.id)
+    .map(
+      (m) => `<div class="tgme_widget_message_wrap js-widget_message_wrap"><div class="tgme_widget_message text_not_supported_wrap${m.service ? ' service_message' : ''} js-widget_message" data-post="${channel}/${m.id}" data-view="eyJjIjotMTEyMTUwMzYxNX0">
+  <div class="tgme_widget_message_user"><a href="https://t.me/${channel}"><i class="tgme_widget_message_user_photo bgcolor1" data-content="Д"></i></a></div>
+  <div class="tgme_widget_message_bubble">
+    <div class="tgme_widget_message_author accent_color"><a class="tgme_widget_message_owner_name" href="https://t.me/${channel}"><span dir="auto">Канал</span></a></div>
+<div class="media_supported_cont"><div class="tgme_widget_message_text js-message_text" dir="auto">${m.html}</div></div><div class="media_not_supported_cont"><div class="message_media_not_supported_wrap">
+  <div class="message_media_not_supported">
+    <div class="message_media_not_supported_label">Please open Telegram to view this post</div>
+    <a href="https://t.me/${channel}/${m.id}" class="message_media_view_in_telegram">VIEW IN TELEGRAM</a>
+  </div>
+</div></div>
+<div class="tgme_widget_message_footer compact js-message_footer">
+  <div class="tgme_widget_message_info short js-message_info">
+    <span class="tgme_widget_message_views">791</span><span class="copyonly"> views</span><span class="tgme_widget_message_meta"><a class="tgme_widget_message_date" href="https://t.me/${channel}/${m.id}"><time datetime="${new Date(m.publishedAt).toISOString().replace(/\.\d{3}Z$/, '+00:00')}" class="time">09:08</time></a></span>
+  </div>
+</div>
+  </div>
+</div></div>`,
+    );
+  return `<!DOCTYPE html>
+<html><head><meta property="og:title" content="Канал"></head><body>
+<div class="tgme_channel_info"></div>
+<section class="tgme_channel_history js-message_history">
+${items.join('')}
+</section></body></html>`;
+}
+
+/** Ответ страницы `t.me/s/…` с адресом после перенаправлений, как его видит fetch. */
+export function tmePage(body: string, url: string, status = 200): Response {
+  const res = new Response(body, { status, headers: { 'content-type': 'text/html; charset=utf-8' } });
+  Object.defineProperty(res, 'url', { value: url });
+  return res;
+}
+
+/**
+ * Копия подменного ответа для повторной выдачи. `clone()` теряет адрес после
+ * перенаправлений, заданный через defineProperty, а адаптер Telegram по нему
+ * отличает страницу канала от карточки, куда t.me уводит с неё.
+ */
+export function copyResponse(res: Response): Response {
+  const copy = res.clone();
+  if (res.url !== '') Object.defineProperty(copy, 'url', { value: res.url });
+  return copy;
+}
+
 /** Graph API пишет время со смещением без двоеточия — как в живых ответах. */
 export function graphTime(ms: number): string {
   return new Date(ms).toISOString().replace(/\.\d{3}Z$/, '+0000');
@@ -68,7 +130,9 @@ export class FakeWorld {
   vk: { id: number; date: number; text: string; is_pinned?: number }[] = [];
   fb: { id: string; created_time: string; message?: string; permalink_url: string }[] = [];
   ig: { id: string; timestamp: string; caption?: string; permalink: string }[] = [];
-  fail: Partial<Record<'vk' | 'graph' | 'telegram', Failure>> = {};
+  /** Открытые каналы Telegram по имени; страница неизвестного уводит на t.me/<имя>. */
+  tg: Record<string, TgMessage[]> = {};
+  fail: Partial<Record<'vk' | 'graph' | 'telegram' | 'tme', Failure>> = {};
   sent: { chatId: string; text: string; previewDisabled: boolean }[] = [];
   calls: Call[] = [];
   /** Чаты, которым Telegram отказывает (403, как при заблокированном боте). */
@@ -85,6 +149,9 @@ export class FakeWorld {
   }
   addIg(id: string, publishedAt: number, caption = `IG пост ${id}`): void {
     this.ig.unshift({ id, timestamp: graphTime(publishedAt), caption, permalink: `https://www.instagram.com/p/${id}/` });
+  }
+  addTg(channel: string, id: number, publishedAt: number, html = `Пост канала ${channel} №${id}`, service = false): void {
+    (this.tg[channel] ??= []).push({ id, publishedAt, html, service });
   }
 
   fetch: FetchLike = async (input, init) => {
@@ -135,13 +202,22 @@ export class FakeWorld {
         return json({ ok: true, result: { message_id: this.sent.length } });
       });
     }
+    if (url.hostname === 't.me') {
+      return this.respond('tme', () => {
+        const channel = url.pathname.slice('/s/'.length);
+        const messages = Object.hasOwn(this.tg, channel) ? this.tg[channel] : undefined;
+        // Как живой t.me: неизвестное имя — перенаправление на карточку без постов.
+        if (!messages) return tmePage('<html><body><div class="tgme_page"></div></body></html>', `https://t.me/${channel}`);
+        return tmePage(channelPage(channel, messages), url.href);
+      });
+    }
     throw new Error(`неожиданный запрос: ${url.hostname}`);
   };
 
-  private respond(kind: 'vk' | 'graph' | 'telegram', ok: () => Response): Response {
+  private respond(kind: 'vk' | 'graph' | 'telegram' | 'tme', ok: () => Response): Response {
     const failure = this.fail[kind];
     if (failure instanceof Error) throw failure;
-    if (failure) return failure.clone();
+    if (failure) return copyResponse(failure);
     return ok();
   }
 

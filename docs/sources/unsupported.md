@@ -19,10 +19,6 @@ The [Threads API](https://developers.facebook.com/docs/threads) reads posts with
 
 The adapter is simple (`GET /{user-id}/threads`, reposts are marked `REPOST_FACADE`). It is worth building if renewing by hand every two months is acceptable.
 
-## Telegram channels
-
-The Bot API cannot read a channel's history. A bot that is an administrator of the channel receives new posts as `channel_post` updates through `getUpdates`, but Telegram keeps them only for 24 hours, and `getUpdates` does not work if the bot has a webhook. The public preview `t.me/s/<channel>` is website markup, not an API: it changes without warning, and Telegram's rules do not describe such scraping. You can connect a channel through a third-party bridge to RSS (for example, RSSHub) as a [feed](feed.md), at your own risk.
-
 ## LinkedIn, Dzen, Odnoklassniki
 
 - **LinkedIn:** posts of a company page are returned only by the Community Management API, and access to it is granted by application.

@@ -41,8 +41,9 @@ social-notifier считает тишину сбоем. Если источни�
 | [YouTube](docs/sources/youtube.ru.md) | `youtube` | ключ YouTube Data API | бесплатно в пределах квоты |
 | [X](docs/sources/x.ru.md) | `x` | токен приложения X API и кредиты | $0,005 за прочитанный пост: для одного аккаунта — центы в месяц |
 | [RSS и Atom](docs/sources/feed.ru.md) | `feed` | адрес ленты | бесплатно: Mastodon, Substack, блоги, подкасты |
+| [Telegram-каналы](docs/sources/telegram.ru.md) | `telegram` | ничего, если канал открытый | бесплатно |
 
-TikTok, Threads, Telegram-каналы, LinkedIn и Дзен пока не поддерживаются — [что мешает каждой сети](docs/sources/unsupported.ru.md).
+TikTok, Threads, LinkedIn и Дзен пока не поддерживаются — [что мешает каждой сети](docs/sources/unsupported.ru.md).
 
 ## Быстрый старт
 

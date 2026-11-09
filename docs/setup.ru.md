@@ -76,6 +76,7 @@ gh variable set RADAR_CONFIG --body config/newsroom.json --repo OWNER/REPO
 | YouTube | [youtube.ru.md](sources/youtube.ru.md) | `YOUTUBE_API_KEY` |
 | X | [x.ru.md](sources/x.ru.md) | `X_BEARER_TOKEN` |
 | RSS и Atom | [feed.ru.md](sources/feed.ru.md) | не нужен |
+| Telegram-каналы | [telegram.ru.md](sources/telegram.ru.md) | не нужен |
 
 Остальные поля конфига описаны в [README](../README.ru.md#настройки).
 

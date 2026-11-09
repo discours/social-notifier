@@ -76,6 +76,7 @@ Replace the sources in the config with your own: the IDs in the examples are Dis
 | YouTube | [youtube.md](sources/youtube.md) | `YOUTUBE_API_KEY` |
 | X | [x.md](sources/x.md) | `X_BEARER_TOKEN` |
 | RSS and Atom | [feed.md](sources/feed.md) | not needed |
+| Telegram channels | [telegram.md](sources/telegram.md) | not needed |
 
 The other config fields are described in the [README](../README.md#configuration).
 
