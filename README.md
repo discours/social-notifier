@@ -4,11 +4,9 @@
 
 [![ci](https://github.com/discours/social-notifier/actions/workflows/ci.yml/badge.svg)](https://github.com/discours/social-notifier/actions/workflows/ci.yml)
 
-**New posts from all your social networks in one Telegram message — and an alert the moment a network stops answering.**
+**Every new post from your social networks in one Telegram message — and an alert when a network goes silent, not three months later.**
 
-social-notifier watches VK, Instagram, Facebook, YouTube, X, Bluesky and any RSS or Atom feed. Posts published within ten minutes of each other arrive as one message, so your team can like and share them while they are fresh. When a token expires or a network stops answering, the person in charge hears about it from the bot: which network, for how long, what to do and why.
-
-It runs on GitHub Actions in your own repository. There is no server to maintain and no subscription to pay: Actions minutes are free for public repositories.
+For newsrooms, nonprofits and media teams whose people like and share fresh posts. social-notifier watches VK, Instagram, Facebook, YouTube, X, Bluesky, Telegram channels and any RSS or Atom feed. It runs on GitHub Actions in your own repository: no server to maintain, no subscription to pay, and Actions minutes are free for public repositories.
 
 ![Posts chat: one message with new posts from VK, Instagram, a blog and YouTube. Alerts chat: Instagram can't be read for 20 minutes, what to do and the reason, then a notice that posts are being read again.](docs/assets/messages.en.svg)
 
@@ -16,19 +14,42 @@ It runs on GitHub Actions in your own repository. There is no server to maintain
 
 The [Discours](https://discours.io) newsroom used to send these notifications through a no-code automation service. When its Meta token expired, the service kept marking every run as successful, and Instagram and Facebook posts stopped reaching the team for three months without a single warning.
 
-social-notifier treats silence as a failure. A source that fails two runs in a row produces an alert, and once it answers again the bot says so.
+social-notifier treats silence as a failure. A source that fails two runs in a row produces an alert, and once it answers again the bot says so. Since November 2026 it has been running the Discours newsroom: VK, Instagram, Facebook, YouTube and two Telegram channels, polled every 10 minutes.
 
 ## What you get
 
+### Your team sees every post while it is fresh
+
 - **One message for every network.** Posts published within the grouping window (10 minutes by default) arrive together, in publication order, each as a link with its first line. A message with a single post shows a link preview.
+- **No archive dumps.** The first run, and the first poll of every new source, remember the posts already published and send nothing. Your chat only ever sees new posts.
+- **Eight networks, one config file.** VK, Instagram, Facebook, YouTube, X, Bluesky, Telegram channels and RSS/Atom, which covers Mastodon, Substack, blogs and podcasts. Add as many sources as you need: each one is a line in the config.
+- **English or Russian.** One field, `"language": "en"` or `"ru"`, switches messages, alerts and logs.
+
+### You hear when a network goes silent
+
 - **Alerts instead of silence.** The alert names the network, how long it has been failing, the exact secret or setting to fix and the reason, with a link to the run log. After the fix comes “posts are being read again”. A source that keeps failing is reminded about once a day, not every ten minutes.
 - **Posts survive outages.** A post leaves the queue only after Telegram has accepted the message. Posts published while a network was down are picked up after the fix — up to `fetchLimit` per source, up to `maxPostAgeHours` old.
-- **No archive dumps.** The first run, and the first poll of every new source, remember the posts already published and send nothing. Your chat only ever sees new posts.
-- **Eight networks, one config file.** VK, Instagram, Facebook, YouTube, X, Bluesky, Telegram channels and RSS/Atom, which covers Mastodon, Substack, blogs and podcasts.
-- **English or Russian.** One field, `"language": "en"` or `"ru"`, switches messages, alerts and logs.
 - **A probe that sets you up.** One workflow reads every source with your tokens, shows which pages the Meta token can see, finds your chat IDs — the bot replies with the ID right in each chat — and sends a sample notification built from your latest posts.
-- **Safe in a public repository.** Tokens never reach logs, alerts or saved state; the public log holds counters, IDs and dates. Every action is pinned by SHA.
+
+### Nothing to host, nothing to leak
+
 - **Nothing to host.** GitHub Actions runs it on schedule; Node.js runs the TypeScript directly, with zero runtime dependencies.
+- **Safe in a public repository.** Tokens never reach logs, alerts or saved state; the public log holds counters, IDs and dates. Secrets can be locked to the `main` branch, and every action is pinned by SHA.
+
+## Is it for you
+
+**A good fit** if:
+
+- your team supports new posts with likes and shares and talks in a Telegram chat;
+- you publish in several networks and want to see everything in one place;
+- an automation has already failed on you without a word.
+
+**Not a fit** if:
+
+- a post must reach the chat within seconds: social-notifier checks the networks every 10 minutes, and under load GitHub starts scheduled runs late;
+- you want to publish or cross-post: social-notifier only reads;
+- you need Instagram Stories, private profiles or collaborative posts owned by another account: it sees what is public or what your token can see;
+- your networks are TikTok, Threads, LinkedIn or Dzen: they are [not supported yet](docs/sources/unsupported.md).
 
 ## Networks
 
