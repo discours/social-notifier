@@ -8,7 +8,7 @@
 
 For newsrooms, nonprofits and media teams whose people like and share fresh posts. social-notifier watches VK, Instagram, Facebook, YouTube, X, Bluesky, Telegram channels and any RSS or Atom feed. It runs on GitHub Actions in your own repository: no server to maintain, no subscription to pay, and Actions minutes are free for public repositories.
 
-![Posts chat: one message with new posts from VK, Instagram, a blog and YouTube. Alerts chat: Instagram can't be read for 20 minutes, what to do and the reason, then a notice that posts are being read again.](docs/assets/messages.en.svg)
+![Posts chat: one message with new posts from VK, Instagram, a blog, YouTube and a Telegram channel. Alerts chat: Instagram can't be read for 20 minutes, what to do and the reason, then a notice that posts are being read again.](docs/assets/messages.en.svg)
 
 ## Why it exists
 
