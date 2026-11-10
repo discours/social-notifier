@@ -17,7 +17,7 @@ import type { Secrets } from '../src/env.ts';
 /** Конфиг «Дискурса» из radar.config.json; тест сверяет, что файл совпадает с ним. */
 export const DISCOURS_CONFIG = {
   language: 'ru',
-  messageTitle: 'Давайте поддержим новые посты!',
+  messageTitle: "Let's like & share new posts!",
   groupWindowMinutes: 10,
   maxPostAgeHours: 48,
   fetchLimit: 25,
