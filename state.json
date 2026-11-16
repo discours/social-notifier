@@ -72,13 +72,7 @@
         "18113615215818589",
         "18048822830814538"
       ],
-      "consecutiveFailures": 1,
-      "failingSince": 1794849209890,
-      "lastError": {
-        "kind": "network",
-        "message": "запрос не прошёл: таймаут",
-        "at": 1794849209890
-      }
+      "consecutiveFailures": 0
     },
     "facebook": {
       "bootstrapped": true,
