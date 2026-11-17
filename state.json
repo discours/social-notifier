@@ -113,7 +113,13 @@
         "1430627470564984_1432200732423103",
         "1430627470564984_1431034465873063"
       ],
-      "consecutiveFailures": 0
+      "consecutiveFailures": 1,
+      "failingSince": 1794910991316,
+      "lastError": {
+        "kind": "network",
+        "message": "запрос не прошёл: таймаут",
+        "at": 1794910991316
+      }
     },
     "youtube": {
       "bootstrapped": true,
