@@ -192,16 +192,7 @@
       "consecutiveFailures": 0
     }
   },
-  "pending": [
-    {
-      "sourceId": "youtube",
-      "id": "_6sWH-uX2NM",
-      "url": "https://www.youtube.com/watch?v=_6sWH-uX2NM",
-      "publishedAt": 1795013473000,
-      "text": "UAT — проверка загрузки видео 18.11",
-      "detectedAt": 1795013946508
-    }
-  ],
+  "pending": [],
   "keepaliveAt": 1794091636574,
   "telegram": {
     "consecutiveFailures": 0
