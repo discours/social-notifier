@@ -130,6 +130,7 @@
       "bootstrapped": true,
       "watchingSince": 1794134932590,
       "seen": [
+        "rfCFckbyaa8",
         "poaGUOJ7YSw",
         "_6sWH-uX2NM",
         "OuyHl5WaOqc",
@@ -204,7 +205,16 @@
       "consecutiveFailures": 0
     }
   },
-  "pending": [],
+  "pending": [
+    {
+      "sourceId": "youtube",
+      "id": "rfCFckbyaa8",
+      "url": "https://www.youtube.com/watch?v=rfCFckbyaa8",
+      "publishedAt": 1795152587000,
+      "text": "Главные революции Европы: что они изменили в обществе и как влияют на поколения XXI века",
+      "detectedAt": 1795152690943
+    }
+  ],
   "keepaliveAt": 1794091636574,
   "telegram": {
     "consecutiveFailures": 0
