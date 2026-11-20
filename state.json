@@ -206,16 +206,7 @@
       "consecutiveFailures": 0
     }
   },
-  "pending": [
-    {
-      "sourceId": "youtube",
-      "id": "VNSMs9bitsE",
-      "url": "https://www.youtube.com/watch?v=VNSMs9bitsE",
-      "publishedAt": 1795167920000,
-      "text": "Главные революции Европы: что они изменили в обществе и как влияют на поколения XXI века",
-      "detectedAt": 1795168181294
-    }
-  ],
+  "pending": [],
   "keepaliveAt": 1794091636574,
   "telegram": {
     "consecutiveFailures": 0
