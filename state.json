@@ -189,13 +189,7 @@
         "9618",
         "9608"
       ],
-      "consecutiveFailures": 1,
-      "failingSince": 1795206146001,
-      "lastError": {
-        "kind": "network",
-        "message": "запрос не прошёл: TypeError (ETIMEDOUT)",
-        "at": 1795206146001
-      }
+      "consecutiveFailures": 0
     },
     "iskra": {
       "bootstrapped": true,
